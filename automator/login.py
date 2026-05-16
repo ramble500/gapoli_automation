@@ -63,6 +63,7 @@ class Controller:
                 options = ChromeOptions()
                 options.add_argument(f"--user-agent={custom_user_agent}")
                 options.add_argument("--disable-blink-features=AutomationControlled")
+                options.add_argument("--start-maximized")
                 if not no_mute:
                     options.add_argument("--mute-audio")
                 options.add_argument("--incognito")
@@ -115,6 +116,10 @@ class Controller:
                     raise
 
         self.driver = driver
+        try:
+            self.driver.maximize_window()
+        except Exception:
+            logger.warning("failed to maximize browser window", exc_info=True)
         self.last_ss = None
         self.ratio = float(self.driver.execute_script("return window.devicePixelRatio"))
 
@@ -375,14 +380,101 @@ class Controller:
             relative_pos[1] * height,
         )
         logger.debug(f"width: {width}, height: {height} x: {pos[0]}, y: {pos[1]}")
-        ac.move_to_element(el)
-        ac.move_by_offset(int(pos[0] - width / 2), int(pos[1] - height / 2))
-        if context:
-            ac.context_click()
-        else:
-            ac.click_and_hold()
-            ac.release()
-        ac.perform()
+        self._scroll_element_point_into_view(el, pos)
+        try:
+            ac.move_to_element(el)
+            ac.move_by_offset(int(pos[0] - width / 2), int(pos[1] - height / 2))
+            if context:
+                ac.context_click()
+            else:
+                ac.click_and_hold()
+                ac.release()
+            ac.perform()
+        except selenium.common.exceptions.MoveTargetOutOfBoundsException:
+            logger.warning(
+                "falling back to CDP click after move target out of bounds",
+                exc_info=True,
+            )
+            self._click_element_point_with_cdp(el, pos, context=context, pause=pause)
+
+    def _scroll_element_point_into_view(self, el, pos):
+        return self.driver.execute_script(
+            """
+            const el = arguments[0];
+            const x = arguments[1];
+            const y = arguments[2];
+            const margin = 20;
+
+            const scrollTargetIntoView = () => {
+                const rect = el.getBoundingClientRect();
+                const targetX = rect.left + x;
+                const targetY = rect.top + y;
+                let dx = 0;
+                let dy = 0;
+
+                if (targetX < margin) {
+                    dx = targetX - margin;
+                } else if (targetX > window.innerWidth - margin) {
+                    dx = targetX - (window.innerWidth - margin);
+                }
+
+                if (targetY < margin) {
+                    dy = targetY - margin;
+                } else if (targetY > window.innerHeight - margin) {
+                    dy = targetY - (window.innerHeight - margin);
+                }
+
+                if (dx !== 0 || dy !== 0) {
+                    window.scrollBy(dx, dy);
+                }
+            };
+
+            scrollTargetIntoView();
+            const rect = el.getBoundingClientRect();
+            return {
+                targetX: rect.left + x,
+                targetY: rect.top + y,
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight,
+                elementWidth: rect.width,
+                elementHeight: rect.height,
+            };
+            """,
+            el,
+            pos[0],
+            pos[1],
+        )
+
+    def _click_element_point_with_cdp(self, el, pos, context=False, pause=0.04):
+        point = self._scroll_element_point_into_view(el, pos)
+        x = point["targetX"]
+        y = point["targetY"]
+        button = "right" if context else "left"
+        buttons = 2 if context else 1
+        logger.info(f"CDP click at x: {x}, y: {y}, viewport: {point}")
+        self.driver.execute_cdp_cmd(
+            "Input.dispatchMouseEvent",
+            {
+                "type": "mousePressed",
+                "x": x,
+                "y": y,
+                "button": button,
+                "buttons": buttons,
+                "clickCount": 1,
+            },
+        )
+        time.sleep(pause)
+        self.driver.execute_cdp_cmd(
+            "Input.dispatchMouseEvent",
+            {
+                "type": "mouseReleased",
+                "x": x,
+                "y": y,
+                "button": button,
+                "buttons": 0,
+                "clickCount": 1,
+            },
+        )
 
     def mouseshake(self, relative_from_xpath: str = None):
         ac = ActionChains(self.driver, duration=40)
