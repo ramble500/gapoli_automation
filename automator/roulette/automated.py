@@ -48,15 +48,16 @@ def win_loop(c: Controller):
 
     ss = c.take_photo_of("//iframe")
     w, h = ss.size
+    screen_ratio = w / c.get_size("//iframe")[0]
 
-    c.click_pos2((454 * w / 500, 813 * h / 849), "//iframe")
+    c.click_pos2((454 * w / 500, 813 * h / 849), "//iframe", ratio=screen_ratio)
     time.sleep(0.4)
-    c.click_pos2((65 * w / 500, 742 * h / 849), "//iframe")
-    c.click_pos2((65 * w / 500, 742 * h / 849), "//iframe")
+    c.click_pos2((65 * w / 500, 742 * h / 849), "//iframe", ratio=screen_ratio)
+    c.click_pos2((65 * w / 500, 742 * h / 849), "//iframe", ratio=screen_ratio)
     time.sleep(0.4)
-    c.click_pos2((39 * w / 500, 325 * h / 849), "//iframe")
+    c.click_pos2((39 * w / 500, 325 * h / 849), "//iframe", ratio=screen_ratio)
     time.sleep(0.4)
-    c.click_pos2((247 * w / 500, 733 * h / 849), "//iframe")
+    c.click_pos2((247 * w / 500, 733 * h / 849), "//iframe", ratio=screen_ratio)
     time.sleep(0.4)
 
     time.sleep(10)

@@ -286,11 +286,33 @@ class Controller:
     def get_dom(self):
         return self.driver.execute_script("return document.documentElement.outerHTML")
 
-    def get_size(self, xpath: str) -> Tuple[int, int]:
-        el = self.driver.find_element(By.TAG_NAME, "body")
-        width = int(el.get_attribute("clientWidth"))
-        height = int(el.get_attribute("clientHeight"))
-        return width, height
+    def _get_element_size(self, el) -> Tuple[float, float]:
+        size = self.driver.execute_script(
+            """
+            const el = arguments[0];
+            if (el === document.body || el === document.documentElement) {
+                return {
+                    width: document.documentElement.clientWidth || window.innerWidth,
+                    height: document.documentElement.clientHeight || window.innerHeight,
+                };
+            }
+            const rect = el.getBoundingClientRect();
+            const width = rect.width || el.clientWidth || el.offsetWidth;
+            const height = rect.height || el.clientHeight || el.offsetHeight;
+            return {width, height};
+            """,
+            el,
+        )
+        return float(size["width"]), float(size["height"])
+
+    def get_size(self, xpath: Optional[str] = None) -> Tuple[int, int]:
+        if xpath is None:
+            el = self.driver.find_element(By.TAG_NAME, "body")
+        else:
+            el = self.driver.find_element(By.XPATH, xpath)
+
+        width, height = self._get_element_size(el)
+        return int(round(width)), int(round(height))
 
     def click_pos(
         self,
@@ -305,25 +327,31 @@ class Controller:
             el = self.driver.find_element(By.XPATH, relative_from_xpath)
         else:
             el = self.driver.find_element(By.TAG_NAME, "body")
-        width = int(el.get_attribute("clientWidth"))
-        height = int(el.get_attribute("clientHeight"))
+        width, height = self._get_element_size(el)
         if no_mult:
             ratio *= 1
         else:
             ratio *= float(self.driver.execute_script("return window.devicePixelRatio"))
 
+        pos = (pos[0] / ratio, pos[1] / ratio)
         logger.debug(f"width: {width}, height: {height} ratio: {ratio}")
-        ac.move_to_element(el)
-        ac.move_by_offset(
-            int(pos[0] / ratio - width / 2), int(pos[1] / ratio - height / 2)
-        )
-        if context:
-            ac.context_click()
-        else:
-            ac.click_and_hold()
-            ac.pause(0.04)
-            ac.release()
-        ac.perform()
+        self._scroll_element_point_into_view(el, pos)
+        try:
+            ac.move_to_element(el)
+            ac.move_by_offset(int(pos[0] - width / 2), int(pos[1] - height / 2))
+            if context:
+                ac.context_click()
+            else:
+                ac.click_and_hold()
+                ac.pause(0.04)
+                ac.release()
+            ac.perform()
+        except selenium.common.exceptions.MoveTargetOutOfBoundsException:
+            logger.warning(
+                "falling back to CDP click after move target out of bounds",
+                exc_info=True,
+            )
+            self._click_element_point_with_cdp(el, pos, context=context)
 
     def click_pos2(
         self,
@@ -338,27 +366,35 @@ class Controller:
             el = self.driver.find_element(By.XPATH, relative_from_xpath)
         else:
             el = self.driver.find_element(By.TAG_NAME, "body")
-        width = int(el.get_attribute("clientWidth"))
-        height = int(el.get_attribute("clientHeight"))
+        width, height = self._get_element_size(el)
         if no_mult:
             ratio *= 1
         else:
             ratio *= float(self.driver.execute_script("return window.devicePixelRatio"))
 
+        pos = (pos[0] / ratio, pos[1] / ratio)
         rect_s = self.driver.execute_script(
             "return arguments[0].getBoundingClientRect()", el
         )
         logger.info(f"width: {width}, height: {height} ratio: {ratio} rect: {rect_s}")
-        ac.move_to_element_with_offset(
-            el, int(pos[0] / ratio - width / 2), int(pos[1] / ratio - height / 2)
-        )
-        if context:
-            ac.context_click()
-        else:
-            ac.click_and_hold()
-            ac.pause(0.04)
-            ac.release()
-        ac.perform()
+        self._scroll_element_point_into_view(el, pos)
+        try:
+            ac.move_to_element_with_offset(
+                el, int(pos[0] - width / 2), int(pos[1] - height / 2)
+            )
+            if context:
+                ac.context_click()
+            else:
+                ac.click_and_hold()
+                ac.pause(0.04)
+                ac.release()
+            ac.perform()
+        except selenium.common.exceptions.MoveTargetOutOfBoundsException:
+            logger.warning(
+                "falling back to CDP click after move target out of bounds",
+                exc_info=True,
+            )
+            self._click_element_point_with_cdp(el, pos, context=context)
 
     def click_relative_pos(
         self,
@@ -372,8 +408,7 @@ class Controller:
             el = self.driver.find_element(By.XPATH, relative_from_xpath)
         else:
             el = self.driver.find_element(By.TAG_NAME, "body")
-        width = int(el.get_attribute("clientWidth"))
-        height = int(el.get_attribute("clientHeight"))
+        width, height = self._get_element_size(el)
 
         pos = (
             relative_pos[0] * width,
