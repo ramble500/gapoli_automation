@@ -9,7 +9,7 @@ from typing import List
 
 from automator.login import Controller
 from automator.utils.influx import write_influx
-from automator.vslot.utils import shrink_window_if_clipped
+from automator.vslot.utils import shrink_window_if_clipped, start_auto_9999
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +202,7 @@ def take_game_store(c):
             return fields
 
 
-def seat_and_check_payout(c: Controller, is_bingo: bool=False, is_variety: bool=False) -> int:
+def seat_and_check_payout(c: Controller, game_id: int, is_bingo: bool=False, is_variety: bool=False) -> int:
     game_type = 'pink' if is_variety else 'green'
     rate = 1
     credit = 1000
@@ -310,26 +310,14 @@ def seat_and_check_payout(c: Controller, is_bingo: bool=False, is_variety: bool=
                         c.click_relative_pos(button_extraball_end_confirm, "//canvas")
                         time.sleep(1)
 
-                    elif is_variety:
-                        # デフォルト設定で1回転まわす
-                        logger.info('1回転まわす')
-                        b_width = 560
-                        b_height = 960
-                        button_start = (300/b_width, 710/b_height)
-                        button_start_2 = (300/b_width, 605/b_height)
-
-                        button_auto = (525/b_width, 925/b_height)
-
-                        c.click_relative_pos(button_auto, "//canvas")
-                        time.sleep(1)
-                        c.click_relative_pos(button_start, "//canvas")
-                        c.click_relative_pos(button_start_2, "//canvas")  # 場合分けが面倒なので両方押す
-                        time.sleep(20)
-
                     else:
-                        for i in range(10):
-                            time.sleep(1)
-                            c.key_down(" ", "//canvas")
+                        logger.info('オート開始')
+                        start_auto_9999(
+                            c,
+                            game_id=game_id,
+                            game_type=game_type,
+                        )
+                        time.sleep(20)
 
 
                     c.driver.switch_to.default_content()

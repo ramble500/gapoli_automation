@@ -157,7 +157,12 @@ with ErrorReporter(c):
 
             c.driver.switch_to.default_content()
 
-            result_payout = seat_and_check_payout(c, is_bingo=is_bingo, is_variety=is_variety)
+            result_payout = seat_and_check_payout(
+                c,
+                game_id=game_id,
+                is_bingo=is_bingo,
+                is_variety=is_variety,
+            )
 
             # 好ペイアウト台を発見
             if result_payout >= ACCEPT_PAYOUT:

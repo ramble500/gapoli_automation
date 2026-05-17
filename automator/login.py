@@ -363,9 +363,7 @@ class Controller:
             "return arguments[0].getBoundingClientRect()", el
         )
         logger.info(f"width: {width}, height: {height} ratio: {ratio} rect: {rect_s}")
-        self._click_element_point_with_mouse(
-            el, pos, context=context, use_offset_action=True
-        )
+        self._click_element_point_with_mouse(el, pos, context=context)
 
     def click_relative_pos(
         self,
@@ -395,9 +393,7 @@ class Controller:
         pos: Tuple[float, float],
         context: bool = False,
         pause: float = 0.04,
-        use_offset_action: bool = False,
     ):
-        width, height = self._get_element_size(el)
         self._scroll_element_point_into_view(el, pos)
         info = self._get_element_point_visibility(el, pos)
         if not info["clickable"]:
@@ -406,13 +402,11 @@ class Controller:
             )
 
         ac = ActionChains(self.driver, duration=int(pause * 1000))
-        if use_offset_action:
-            ac.move_to_element_with_offset(
-                el, int(pos[0] - width / 2), int(pos[1] - height / 2)
-            )
-        else:
-            ac.move_to_element(el)
-            ac.move_by_offset(int(pos[0] - width / 2), int(pos[1] - height / 2))
+        ac.move_to_element_with_offset(
+            el,
+            int(pos[0] - info["inViewCenterElementX"]),
+            int(pos[1] - info["inViewCenterElementY"]),
+        )
         if context:
             ac.context_click()
         else:
@@ -444,6 +438,12 @@ class Controller:
                 hit && hit.className && hit.className.baseVal !== undefined
                     ? hit.className.baseVal
                     : String(hit ? hit.className : "");
+            const visibleLeft = Math.max(rect.left, 0);
+            const visibleTop = Math.max(rect.top, 0);
+            const visibleRight = Math.min(rect.right, window.innerWidth);
+            const visibleBottom = Math.min(rect.bottom, window.innerHeight);
+            const inViewCenterX = (visibleLeft + visibleRight) / 2;
+            const inViewCenterY = (visibleTop + visibleBottom) / 2;
             return {
                 clickable:
                     rect.width > 0 &&
@@ -463,6 +463,8 @@ class Controller:
                 viewportHeight: window.innerHeight,
                 elementWidth: rect.width,
                 elementHeight: rect.height,
+                inViewCenterElementX: inViewCenterX - rect.left,
+                inViewCenterElementY: inViewCenterY - rect.top,
             };
             """,
             el,
