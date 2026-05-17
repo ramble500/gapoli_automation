@@ -28,7 +28,7 @@ def get_seats_info(c: Controller):
 def block_everyone(c: Controller):
     els = c.get_elements('//div[contains(@class, "AvatarIconContainer")]')
     for item in els:
-        item.click()
+        c.click_element(item)
 
         el = c.wait_it(
             '//div[contains(@class, "_relative_")]/div/button[contains(@class, "menu-button")]'
@@ -39,12 +39,12 @@ def block_everyone(c: Controller):
         )
 
         el = c.wait_it('//span[contains(text(), "ブロック")]')
-        el.click()
+        c.click_element(el)
 
         el = c.wait_it(
             '//button[contains(@class, "applyButton")][contains(text(), "ブロック")]'
         )
-        el.click()
+        c.click_element(el)
 
     return len(els)
 

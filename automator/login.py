@@ -134,15 +134,19 @@ class Controller:
     def click_it(self, xpath, timeout=10):
         driver = self.driver
         WebDriverWait(driver, timeout).until(
-            EC.presence_of_element_located((By.XPATH, xpath))
+            EC.element_to_be_clickable((By.XPATH, xpath))
         )
         for i in range(10):
             try:
                 el = driver.find_element(By.XPATH, xpath)
-                el.click()
+                self.click_element(el)
             except selenium.common.exceptions.StaleElementReferenceException:
                 continue
             break
+
+    def click_element(self, el):
+        width, height = self._get_element_size(el)
+        self._click_element_point_with_mouse(el, (width / 2, height / 2))
 
     def scroll_into(self, xpath, timeout=10):
         driver = self.driver
@@ -322,7 +326,6 @@ class Controller:
         ratio: float = 1,
         context: bool = False,
     ):
-        ac = ActionChains(self.driver, duration=40)
         if relative_from_xpath is not None:
             el = self.driver.find_element(By.XPATH, relative_from_xpath)
         else:
@@ -335,23 +338,7 @@ class Controller:
 
         pos = (pos[0] / ratio, pos[1] / ratio)
         logger.debug(f"width: {width}, height: {height} ratio: {ratio}")
-        self._scroll_element_point_into_view(el, pos)
-        try:
-            ac.move_to_element(el)
-            ac.move_by_offset(int(pos[0] - width / 2), int(pos[1] - height / 2))
-            if context:
-                ac.context_click()
-            else:
-                ac.click_and_hold()
-                ac.pause(0.04)
-                ac.release()
-            ac.perform()
-        except selenium.common.exceptions.MoveTargetOutOfBoundsException:
-            logger.warning(
-                "falling back to CDP click after move target out of bounds",
-                exc_info=True,
-            )
-            self._click_element_point_with_cdp(el, pos, context=context)
+        self._click_element_point_with_mouse(el, pos, context=context)
 
     def click_pos2(
         self,
@@ -361,7 +348,6 @@ class Controller:
         ratio: float = 1,
         context: bool = False,
     ):
-        ac = ActionChains(self.driver, duration=40)
         if relative_from_xpath is not None:
             el = self.driver.find_element(By.XPATH, relative_from_xpath)
         else:
@@ -377,24 +363,9 @@ class Controller:
             "return arguments[0].getBoundingClientRect()", el
         )
         logger.info(f"width: {width}, height: {height} ratio: {ratio} rect: {rect_s}")
-        self._scroll_element_point_into_view(el, pos)
-        try:
-            ac.move_to_element_with_offset(
-                el, int(pos[0] - width / 2), int(pos[1] - height / 2)
-            )
-            if context:
-                ac.context_click()
-            else:
-                ac.click_and_hold()
-                ac.pause(0.04)
-                ac.release()
-            ac.perform()
-        except selenium.common.exceptions.MoveTargetOutOfBoundsException:
-            logger.warning(
-                "falling back to CDP click after move target out of bounds",
-                exc_info=True,
-            )
-            self._click_element_point_with_cdp(el, pos, context=context)
+        self._click_element_point_with_mouse(
+            el, pos, context=context, use_offset_action=True
+        )
 
     def click_relative_pos(
         self,
@@ -403,7 +374,6 @@ class Controller:
         context: bool = False,
         pause=0.04,
     ):
-        ac = ActionChains(self.driver, duration=int(pause * 1000))
         if relative_from_xpath is not None:
             el = self.driver.find_element(By.XPATH, relative_from_xpath)
         else:
@@ -415,22 +385,90 @@ class Controller:
             relative_pos[1] * height,
         )
         logger.debug(f"width: {width}, height: {height} x: {pos[0]}, y: {pos[1]}")
+        self._click_element_point_with_mouse(
+            el, pos, context=context, pause=pause
+        )
+
+    def _click_element_point_with_mouse(
+        self,
+        el,
+        pos: Tuple[float, float],
+        context: bool = False,
+        pause: float = 0.04,
+        use_offset_action: bool = False,
+    ):
+        width, height = self._get_element_size(el)
         self._scroll_element_point_into_view(el, pos)
-        try:
+        info = self._get_element_point_visibility(el, pos)
+        if not info["clickable"]:
+            raise selenium.common.exceptions.MoveTargetOutOfBoundsException(
+                f"target point is not visibly clickable: {info}"
+            )
+
+        ac = ActionChains(self.driver, duration=int(pause * 1000))
+        if use_offset_action:
+            ac.move_to_element_with_offset(
+                el, int(pos[0] - width / 2), int(pos[1] - height / 2)
+            )
+        else:
             ac.move_to_element(el)
             ac.move_by_offset(int(pos[0] - width / 2), int(pos[1] - height / 2))
-            if context:
-                ac.context_click()
-            else:
-                ac.click_and_hold()
-                ac.release()
-            ac.perform()
-        except selenium.common.exceptions.MoveTargetOutOfBoundsException:
-            logger.warning(
-                "falling back to CDP click after move target out of bounds",
-                exc_info=True,
-            )
-            self._click_element_point_with_cdp(el, pos, context=context, pause=pause)
+        if context:
+            ac.context_click()
+        else:
+            ac.click_and_hold()
+            ac.pause(pause)
+            ac.release()
+        ac.perform()
+
+    def _get_element_point_visibility(self, el, pos):
+        return self.driver.execute_script(
+            """
+            const el = arguments[0];
+            const x = arguments[1];
+            const y = arguments[2];
+            const rect = el.getBoundingClientRect();
+            const targetX = rect.left + x;
+            const targetY = rect.top + y;
+            const style = window.getComputedStyle(el);
+            const inViewport =
+                targetX >= 0 &&
+                targetY >= 0 &&
+                targetX < window.innerWidth &&
+                targetY < window.innerHeight;
+            const hit = inViewport
+                ? document.elementFromPoint(targetX, targetY)
+                : null;
+            const targetReceivesClick = hit === el || el.contains(hit);
+            const hitClassName =
+                hit && hit.className && hit.className.baseVal !== undefined
+                    ? hit.className.baseVal
+                    : String(hit ? hit.className : "");
+            return {
+                clickable:
+                    rect.width > 0 &&
+                    rect.height > 0 &&
+                    style.display !== "none" &&
+                    style.visibility !== "hidden" &&
+                    style.pointerEvents !== "none" &&
+                    inViewport &&
+                    targetReceivesClick,
+                inViewport,
+                targetReceivesClick,
+                hitTagName: hit ? hit.tagName : null,
+                hitClassName,
+                targetX,
+                targetY,
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight,
+                elementWidth: rect.width,
+                elementHeight: rect.height,
+            };
+            """,
+            el,
+            pos[0],
+            pos[1],
+        )
 
     def _scroll_element_point_into_view(self, el, pos):
         return self.driver.execute_script(
@@ -478,37 +516,6 @@ class Controller:
             el,
             pos[0],
             pos[1],
-        )
-
-    def _click_element_point_with_cdp(self, el, pos, context=False, pause=0.04):
-        point = self._scroll_element_point_into_view(el, pos)
-        x = point["targetX"]
-        y = point["targetY"]
-        button = "right" if context else "left"
-        buttons = 2 if context else 1
-        logger.info(f"CDP click at x: {x}, y: {y}, viewport: {point}")
-        self.driver.execute_cdp_cmd(
-            "Input.dispatchMouseEvent",
-            {
-                "type": "mousePressed",
-                "x": x,
-                "y": y,
-                "button": button,
-                "buttons": buttons,
-                "clickCount": 1,
-            },
-        )
-        time.sleep(pause)
-        self.driver.execute_cdp_cmd(
-            "Input.dispatchMouseEvent",
-            {
-                "type": "mouseReleased",
-                "x": x,
-                "y": y,
-                "button": button,
-                "buttons": 0,
-                "clickCount": 1,
-            },
         )
 
     def mouseshake(self, relative_from_xpath: str = None):

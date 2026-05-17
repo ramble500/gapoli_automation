@@ -31,7 +31,7 @@ def main(c: Controller, hall: str):
             c.driver.switch_to.default_content()
             c.wait_it(f'//span[contains(text(), "{game_name}")]')
             el = c.get_element(f'//span[contains(text(), "{game_name}")]')
-            el.click()
+            c.click_element(el)
 
             c.wait_random()
 

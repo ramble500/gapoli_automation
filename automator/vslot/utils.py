@@ -103,11 +103,8 @@ def finish_game(c: Controller, save_image: bool = True, from_dialog=False, is_bi
         try:
             c.click_it(xpath)
         except Exception:
-            el = c.get_element(xpath)
-            if el is None:
-                raise
-            logger.info(f"通常クリック失敗 → JSクリック: {xpath}")
-            c.driver.execute_script("arguments[0].click();", el)
+            logger.warning(f"通常クリック失敗: {xpath}", exc_info=True)
+            raise
 
     while time.time() < timeout:
         next_xpath = '//button[contains(normalize-space(.), "次へ")]'
@@ -269,6 +266,71 @@ def shrink_window(c: Controller, game_type: str='green'):
     time.sleep(1.5)
 
 
+def shrink_window_if_clipped(c: Controller, game_type: str='green'):
+    c.driver.switch_to.default_content()
+    iframe = c.get_element(f'//div[contains(@class, "{game_type}")]//iframe')
+    if iframe is None:
+        return
+
+    info = c.driver.execute_script(
+        """
+        const rect = arguments[0].getBoundingClientRect();
+        return {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+        };
+        """,
+        iframe,
+    )
+    is_clipped = (
+        info["left"] < 0
+        or info["top"] < 0
+        or info["right"] > info["viewportWidth"]
+        or info["bottom"] > info["viewportHeight"]
+    )
+    if not is_clipped:
+        return
+
+    logger.info(f"game iframe is clipped; shrinking window: {info}")
+    shrink_window(c, game_type=game_type)
+
+
+def start_auto_9999(c: Controller, game_id: int, game_type: str='green', no_fast: bool=False):
+    b_width = 560
+    b_height = 960
+
+    button_auto_menu = (525 / b_width, 925 / b_height)
+    if game_id == 20246:
+        button_spin_count_9999 = (0.63, 0.44)
+        button_fast_auto = (0.2, 0.5)
+        button_ok = (0.5, 0.6)
+    else:
+        button_spin_count_9999 = (0.63, 0.51)
+        button_fast_auto = (0.4, 0.57) if game_id == 20216 else (0.2, 0.56)
+        button_ok = (0.5, 0.65)
+
+    focus_main_window(c, game_type=game_type)
+    logger.info("select auto menu button")
+    c.click_relative_pos(button_auto_menu, "//canvas")
+    time.sleep(0.2)
+
+    logger.info("select auto spin count 9999")
+    c.click_relative_pos(button_spin_count_9999, "//canvas")
+    time.sleep(0.2)
+
+    if not no_fast:
+        logger.info("enable fast auto")
+        c.click_relative_pos(button_fast_auto, "//canvas")
+        time.sleep(0.2)
+
+    logger.info("confirm auto settings")
+    c.click_relative_pos(button_ok, "//canvas")
+
+
 # ウインドウを定位置に移動する
 def move_window_to_right(c: Controller, game_type: str='green'):
     pos = (0.95, 0) 
@@ -337,12 +399,9 @@ def seat(c: Controller, rate: int = 10, credit: int = 10000, accept_payout: int 
         try:
             c.click_it('//button[text()="プレイ"]')
         except Exception:
-            logger.info("プレイボタンが他要素に遮られたため、少し待ってJSクリック")
+            logger.info("プレイボタンが他要素に遮られたため、少し待って再クリック")
             time.sleep(1.5)
-            el = c.get_element('//button[text()="プレイ"]')
-            if el is None:
-                raise
-            c.driver.execute_script("arguments[0].click();", el)
+            c.click_it('//button[text()="プレイ"]', timeout=5)
 
         pulldown_xpath = '//div[contains(@class, "_pulldown")]'
 

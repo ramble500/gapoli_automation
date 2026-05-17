@@ -9,6 +9,7 @@ from typing import List
 
 from automator.login import Controller
 from automator.utils.influx import write_influx
+from automator.vslot.utils import shrink_window_if_clipped
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +250,7 @@ def seat_and_check_payout(c: Controller, is_bingo: bool=False, is_variety: bool=
     c.click_it('//button[text()="プレイ開始"]')
 
     c.wait_random(3)
+    shrink_window_if_clipped(c, game_type=game_type)
 
     try:
         p_logs = c.driver.get_log("performance")

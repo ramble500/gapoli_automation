@@ -17,6 +17,8 @@ from automator.vslot.utils import (
     take_store_all,
     buy_medal,
     shrink_window,
+    shrink_window_if_clipped,
+    start_auto_9999,
     move_window_to_right,
     bring_window_to_front,
     bring_window_to_front_2
@@ -195,8 +197,7 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                         POSITION_STACK[GAME_ID] = len(POSITION_STACK)
 
                 # ウインドウサイズを小さくする
-                #logger.info('shrink_window')
-                #shrink_window(c, game_type=GAME_TYPE)
+                shrink_window_if_clipped(c, game_type=GAME_TYPE)
 
                 logger.info(POSITION_STACK)
                 # ウインドウを定位置に移動する
@@ -211,39 +212,12 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                 # オート開始処理を行う間はロック
                 with processing_lock:
                     bring_window_to_front(c, game_type=GAME_TYPE)
-                    focus_main_window(c, game_type=GAME_TYPE)
-
-                    # オートボタン
-                    c.click_relative_pos((0.95, 0.95), "//canvas")
-                    time.sleep(0.2)
-
-                    # SPIN WILDは位置がズレてる
-                    if GAME_ID == 20246:
-                        c.click_relative_pos((0.63, 0.44), "//canvas")
-                        time.sleep(0.2)
-
-                        # 高速オート
-                        if not NO_FAST:
-                            c.click_relative_pos((0.2, 0.5), "//canvas")
-                            time.sleep(0.2)
-
-                        # 決定
-                        c.click_relative_pos((0.5, 0.6), "//canvas")
-                    else:
-                        c.click_relative_pos((0.63, 0.51), "//canvas")
-                        time.sleep(0.2)
-
-                        # 高速オート
-                        if not NO_FAST:
-                            # DJ ALIENは位置が異なる
-                            if GAME_ID == 20216:
-                                c.click_relative_pos((0.4, 0.57), "//canvas")
-                            else:
-                                c.click_relative_pos((0.2, 0.56), "//canvas")
-                            time.sleep(0.2)
-
-                        # 決定
-                        c.click_relative_pos((0.5, 0.65), "//canvas")
+                    start_auto_9999(
+                        c,
+                        game_id=GAME_ID,
+                        game_type=GAME_TYPE,
+                        no_fast=NO_FAST,
+                    )
 
                     c.driver.switch_to.default_content()
 
@@ -332,40 +306,12 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                 button_datapanel = (35/b_width, 925/b_height)
 
                 if GAME_ID == 20205:
-                    button_spec = [
-                        (105/b_width, 255/b_height),
-                        (105/b_width, 340/b_height),
-                    ]
-                    button_bet = [
-                        (130/b_width, 540/b_height),
-                        (130/b_width, 590/b_height),
-                        (130/b_width, 640/b_height),
-                    ]
-
                     button_start = (300/b_width, 710/b_height)
                 
                 elif GAME_ID == 20204:
-                    button_spec = [  # 個別に処理したくないのでダミーの位置をクリック
-                        (300/b_width, 320/b_height),
-                        (300/b_width, 320/b_height),
-                    ]
-                    button_bet = [
-                        (185/b_width, 460/b_height),
-                        (185/b_width, 500/b_height),
-                        (185/b_width, 540/b_height),
-                    ]
                     button_start = (300/b_width, 605/b_height)
 
                 elif GAME_ID == 20226:
-                    button_spec = [
-                        (110/b_width, 280/b_height),
-                        (105/b_width, 355/b_height),
-                    ]
-                    button_bet = [
-                        (140/b_width, 560/b_height),
-                        (140/b_width, 610/b_height),
-                        (140/b_width, 660/b_height),
-                    ]
                     button_start = (300/b_width, 710/b_height)
 
                 # 初期設定を行う間はロック
@@ -378,20 +324,12 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                         buy_medal(c, game_type=GAME_TYPE, credit=CREDIT)
                         buy_medal(c, game_type=GAME_TYPE, credit=CREDIT)
 
-                    focus_main_window(c, game_type=GAME_TYPE)
-
-                    # オート選択
-                    logger.info(f'[{GAME_NAME}] オート選択')
-                    c.click_relative_pos(button_auto, "//canvas")
-                    time.sleep(0.5)
-                    # スペック選択
-                    logger.info(f'[{GAME_NAME}] スペック選択 ({VARIETY_SPEC})')
-                    c.click_relative_pos(button_spec[VARIETY_SPEC - 1], "//canvas")
-                    time.sleep(0.5)
-                    # ベット数選択
-                    logger.info(f'[{GAME_NAME}] ベット数選択 ({VARIETY_BET})')
-                    c.click_relative_pos(button_bet[VARIETY_BET - 1], "//canvas")
-                    time.sleep(0.5)
+                    start_auto_9999(
+                        c,
+                        game_id=GAME_ID,
+                        game_type=GAME_TYPE,
+                        no_fast=NO_FAST,
+                    )
 
                     logger.info(f'[{GAME_NAME}] オート開始 (バラエティ)')
 
