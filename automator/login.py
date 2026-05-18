@@ -401,19 +401,112 @@ class Controller:
                 f"target point is not visibly clickable: {info}"
             )
 
-        ac = ActionChains(self.driver, duration=int(pause * 1000))
-        ac.move_to_element_with_offset(
-            el,
-            int(pos[0] - info["inViewCenterElementX"]),
-            int(pos[1] - info["inViewCenterElementY"]),
+        frame_path = self._get_frame_path_to_top()
+        try:
+            self.driver.switch_to.default_content()
+            target = self._get_top_viewport_click_origin(info)
+            logger.info(f"mouse click target: {target['log']}")
+            ac = ActionChains(self.driver, duration=int(pause * 1000))
+            ac.move_to_element_with_offset(
+                target["element"],
+                int(info["topTargetX"] - target["centerX"]),
+                int(info["topTargetY"] - target["centerY"]),
+            )
+            if context:
+                ac.context_click()
+            else:
+                ac.click_and_hold()
+                ac.pause(pause)
+                ac.release()
+            ac.perform()
+        finally:
+            self._restore_frame_path(frame_path)
+
+    def _get_top_viewport_click_origin(self, info):
+        target = self.driver.execute_script(
+            """
+            const x = arguments[0];
+            const y = arguments[1];
+            const el = document.elementFromPoint(x, y);
+            if (!el) {
+                return null;
+            }
+            const rect = el.getBoundingClientRect();
+            const visibleLeft = Math.max(rect.left, 0);
+            const visibleTop = Math.max(rect.top, 0);
+            const visibleRight = Math.min(rect.right, window.innerWidth);
+            const visibleBottom = Math.min(rect.bottom, window.innerHeight);
+            const centerX = (visibleLeft + visibleRight) / 2;
+            const centerY = (visibleTop + visibleBottom) / 2;
+            const className =
+                el.className && el.className.baseVal !== undefined
+                    ? el.className.baseVal
+                    : String(el.className || "");
+            return {
+                element: el,
+                centerX,
+                centerY,
+                tagName: el.tagName,
+                className,
+                left: rect.left,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.bottom,
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight,
+            };
+            """,
+            info["topTargetX"],
+            info["topTargetY"],
         )
-        if context:
-            ac.context_click()
-        else:
-            ac.click_and_hold()
-            ac.pause(pause)
-            ac.release()
-        ac.perform()
+        if target is None:
+            raise selenium.common.exceptions.MoveTargetOutOfBoundsException(
+                f"no visible top-level click origin: {info}"
+            )
+        target["log"] = {
+            "x": info["topTargetX"],
+            "y": info["topTargetY"],
+            "originTag": target["tagName"],
+            "originClass": target["className"],
+            "offsetX": info["topTargetX"] - target["centerX"],
+            "offsetY": info["topTargetY"] - target["centerY"],
+            "originRect": {
+                "left": target["left"],
+                "top": target["top"],
+                "right": target["right"],
+                "bottom": target["bottom"],
+            },
+            "viewport": {
+                "width": target["viewportWidth"],
+                "height": target["viewportHeight"],
+            },
+        }
+        return target
+
+    def _get_frame_path_to_top(self):
+        return self.driver.execute_script(
+            """
+            const path = [];
+            let frameWindow = window;
+            while (frameWindow !== frameWindow.top) {
+                const frameElement = frameWindow.frameElement;
+                if (!frameElement) {
+                    break;
+                }
+                const frames = Array.from(
+                    frameWindow.parent.document.querySelectorAll("iframe,frame")
+                );
+                path.unshift(frames.indexOf(frameElement));
+                frameWindow = frameWindow.parent;
+            }
+            return path;
+            """
+        )
+
+    def _restore_frame_path(self, frame_path):
+        self.driver.switch_to.default_content()
+        for frame_index in frame_path:
+            self.driver.switch_to.frame(frame_index)
 
     def _get_element_point_visibility(self, el, pos):
         return self.driver.execute_script(
@@ -444,6 +537,36 @@ class Controller:
             const visibleBottom = Math.min(rect.bottom, window.innerHeight);
             const inViewCenterX = (visibleLeft + visibleRight) / 2;
             const inViewCenterY = (visibleTop + visibleBottom) / 2;
+            let topTargetX = targetX;
+            let topTargetY = targetY;
+            let frameWindow = window;
+            let topFrameElement = null;
+            while (frameWindow !== frameWindow.top) {
+                const frameElement = frameWindow.frameElement;
+                if (!frameElement) {
+                    break;
+                }
+                const frameRect = frameElement.getBoundingClientRect();
+                topTargetX += frameRect.left;
+                topTargetY += frameRect.top;
+                topFrameElement = frameElement;
+                frameWindow = frameWindow.parent;
+            }
+            const topInViewport =
+                topTargetX >= 0 &&
+                topTargetY >= 0 &&
+                topTargetX < window.top.innerWidth &&
+                topTargetY < window.top.innerHeight;
+            const topHit = topInViewport
+                ? window.top.document.elementFromPoint(topTargetX, topTargetY)
+                : null;
+            const topTargetReceivesClick = topFrameElement
+                ? topHit === topFrameElement || topFrameElement.contains(topHit)
+                : targetReceivesClick;
+            const topHitClassName =
+                topHit && topHit.className && topHit.className.baseVal !== undefined
+                    ? topHit.className.baseVal
+                    : String(topHit ? topHit.className : "");
             return {
                 clickable:
                     rect.width > 0 &&
@@ -452,15 +575,25 @@ class Controller:
                     style.visibility !== "hidden" &&
                     style.pointerEvents !== "none" &&
                     inViewport &&
-                    targetReceivesClick,
+                    targetReceivesClick &&
+                    topInViewport &&
+                    topTargetReceivesClick,
                 inViewport,
                 targetReceivesClick,
+                topInViewport,
+                topTargetReceivesClick,
                 hitTagName: hit ? hit.tagName : null,
                 hitClassName,
+                topHitTagName: topHit ? topHit.tagName : null,
+                topHitClassName,
                 targetX,
                 targetY,
+                topTargetX,
+                topTargetY,
                 viewportWidth: window.innerWidth,
                 viewportHeight: window.innerHeight,
+                topViewportWidth: window.top.innerWidth,
+                topViewportHeight: window.top.innerHeight,
                 elementWidth: rect.width,
                 elementHeight: rect.height,
                 inViewCenterElementX: inViewCenterX - rect.left,

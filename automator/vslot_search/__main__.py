@@ -101,7 +101,7 @@ except Exception as e:
     logger.error('failed to load machine list. is machine_list.csv present?')
     exit(1)
     
-logger.warn(f'target list: {MACHINE_LIST}')
+logger.warning(f'target list: {MACHINE_LIST}')
 
 c = Controller(headless=False, network_logging=True, no_mute=NO_MUTE)
 

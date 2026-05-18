@@ -313,6 +313,7 @@ def start_auto_9999(c: Controller, game_id: int, game_type: str='green', no_fast
         button_fast_auto = (0.4, 0.57) if game_id == 20216 else (0.2, 0.56)
         button_ok = (0.5, 0.65)
 
+    shrink_window_if_clipped(c, game_type=game_type)
     focus_main_window(c, game_type=game_type)
     logger.info("select auto menu button")
     c.click_relative_pos(button_auto_menu, "//canvas")
