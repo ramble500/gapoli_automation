@@ -22,7 +22,6 @@ import os
 import time
 from pathlib import Path
 import csv
-import random
 
 from automator.login import Controller
 from automator.utils.influx import init_influx
@@ -129,25 +128,21 @@ with ErrorReporter(c):
 
     # 事故防止のため、ほかのゲームが起動中は中止
     c.login(f"https://gapoli.net/game/")
-    resumed_games = initial_action(c)
+    settled_games = initial_action(c, interrupted_action="settle")
     c.wait_loaded()
 
-    if len(resumed_games) >= 1:
-        logger.error('ほかのゲームをすべて精算してから起動してください')
-        exit(1)
+    if len(settled_games) >= 1:
+        logger.warning("中断ゲームを精算してsearchを続行: %s", settled_games)
 
 
-    remain_count = 999999
     nice_machine = None
 
     for i in range(10):
         logger.warning(f'---- loop {i+1} start ----')
-        # 機種リストをシャッフル
         machine_search_order = list(MACHINE_LIST.keys())
-        random.shuffle(machine_search_order)
         logger.info(machine_search_order)
 
-        # 順に、着席→数回プレイ→離席 を繰り返す
+        # 順に、着席→buy_medalのpayout確認→精算 を繰り返す
         for game_id in machine_search_order:
             is_bingo = game_id in [20256, 20218]
             is_variety = game_id in [20205, 20204, 20226]
@@ -168,15 +163,9 @@ with ErrorReporter(c):
             if result_payout >= ACCEPT_PAYOUT:
                 nice_machine = game_id
                 logger.warning('  O nice payout (%d) for %s (%d)!' % (result_payout, MACHINE_LIST[game_id], game_id))
-                # 対象機種が見つかった場合でも、カモフラージュのため追加で何回かまわす
-                if remain_count > 100:
-                    remain_count = int(random.random() * 3) + 3
+                break
             else:
                 logger.warning('  X  bad payout (%d) for %s' % (result_payout, MACHINE_LIST[game_id]) )
-            
-            remain_count -= 1
-            if remain_count < 0:
-                break
 
         if nice_machine:
             break

@@ -2,14 +2,13 @@ import base64
 import datetime
 import json
 import logging
-import random
 import time
 from pathlib import Path
 from typing import List
 
 from automator.login import Controller
 from automator.utils.influx import write_influx
-from automator.vslot.utils import shrink_window_if_clipped, start_auto_9999
+from automator.vslot.utils import shrink_window_if_clipped
 
 logger = logging.getLogger(__name__)
 
@@ -28,43 +27,17 @@ def finish_game(c: Controller, save_image: bool = True, from_dialog=False, is_bi
     c.driver.switch_to.default_content()
 
     if not from_dialog:
-        for i in range(30 if not is_variety else 999):
-            if c.get_element(
-                f'//div[contains(@class, "{game_type}")]//div[contains(@class, "checkButtonWrapper") and contains(@class, "disabled") and not(contains(@class, "item"))]'
-            ):
-                # WIN回収
-                logger.info("payoff disabled. press space...")
-                focus_main_window(c, game_type=game_type)
-                c.key_down(" ", "//canvas")
-                c.driver.switch_to.default_content()
-                time.sleep(1)
-            c.wait_it(
-                f'//div[contains(@class, "{game_type}")]//div[contains(@class, "checkButtonWrapper") and not(contains(@class, "disabled")) and not(contains(@class, "item"))]'
-            )
-            logger.info("click checkButtonWrapper")
-            c.click_it(
-                f'//div[contains(@class, "{game_type}")]//div[contains(@class, "checkButtonWrapper") and not(contains(@class, "disabled")) and not(contains(@class, "item"))]'
-            )
-            c.wait_random()
-            try:
-                el = c.wait_it(
-                    '//div/div/span[text()[contains(.,"精算確認")]]', timeout=2
-                )
-            except:
-                el = None
-                # どこかでスタックしている可能性があるため、一度スペースボタンを押す (ビンゴ、バラエティを除く)
-                if not is_bingo and not is_variety:
-                    logger.info("still in game. press space...")
-                    focus_main_window(c, game_type=game_type)
-                    c.key_down(" ", "//canvas")
-                    c.driver.switch_to.default_content()
-                    time.sleep(5)
-                else:
-                    #logger.info('still in game. waiting...')
-                    time.sleep(1.5)
-
-            if el is not None:
-                break
+        check_button_xpath = (
+            f'//div[contains(@class, "{game_type}")]'
+            '//div[contains(@class, "checkButtonWrapper") '
+            'and not(contains(@class, "disabled")) '
+            'and not(contains(@class, "item"))]'
+        )
+        c.wait_it(check_button_xpath, timeout=60)
+        logger.info("click checkButtonWrapper")
+        c.click_it(check_button_xpath)
+        c.wait_random()
+        el = c.wait_it('//div/div/span[text()[contains(.,"精算確認")]]', timeout=10)
     else:
         el = c.wait_it('//div/div/span[text()[contains(.,"精算確認")]]')
 
@@ -251,6 +224,7 @@ def seat_and_check_payout(c: Controller, game_id: int, is_bingo: bool=False, is_
 
     c.wait_random(3)
     shrink_window_if_clipped(c, game_type=game_type)
+    payout = None
 
     try:
         p_logs = c.driver.get_log("performance")
@@ -279,49 +253,9 @@ def seat_and_check_payout(c: Controller, game_id: int, is_bingo: bool=False, is_
                 if "buy_medal" in msg["params"]["response"]["url"]:
                     payout = int(json.loads(body["body"])["data"]["payout"])
                     logger.info(f"{payout=}")
-                    # この先は元のコードを続けてください
-
-
-                    # 何回かまわす
-                    focus_main_window(c, game_type=game_type)
-
-                    if is_bingo:
-                        b_width = 560
-                        b_height = 960
-
-                        button_leftpanel = (8/b_width, 830/b_height)
-                        button_speed3 = (170/b_width, 830/b_height)
-                        button_begin = (465/b_width, 825/b_height)
-                        button_extraball_end = (100/b_width, 825/b_height)
-                        button_extraball_end_confirm = (160/b_width, 650/b_height)
-
-                        logger.info('スピード3に設定')
-                        c.click_relative_pos(button_leftpanel, "//canvas")
-                        time.sleep(0.5)
-                        c.click_relative_pos(button_speed3, "//canvas")
-                        time.sleep(0.5)
-
-                        logger.info('1回転まわす')
-                        c.click_relative_pos(button_begin, "//canvas")
-                        time.sleep(5.5)
-
-                        c.click_relative_pos(button_extraball_end, "//canvas")
-                        time.sleep(0.8)
-                        c.click_relative_pos(button_extraball_end_confirm, "//canvas")
-                        time.sleep(1)
-
-                    else:
-                        logger.info('オート開始')
-                        start_auto_9999(
-                            c,
-                            game_id=game_id,
-                            game_type=game_type,
-                        )
-                        time.sleep(20)
-
-
+                    logger.info("search payout checked from buy_medal; no spin/auto")
                     c.driver.switch_to.default_content()
-                    c.wait_random(4)
+                    c.wait_random()
 
                     # 精算
                     finish_game(c, save_image=False, is_bingo=is_bingo, is_variety=is_variety, game_type=game_type)
@@ -333,5 +267,8 @@ def seat_and_check_payout(c: Controller, game_id: int, is_bingo: bool=False, is_
         c.driver.execute_cdp_cmd(
             "Network.setCacheDisabled", {"cacheDisabled": False}
         )
+
+    if payout is None:
+        raise Exception("buy_medal response was not found; payout could not be checked")
 
     return payout
