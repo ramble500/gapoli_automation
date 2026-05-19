@@ -188,28 +188,178 @@ class Controller:
             if attempt >= max_scrolls:
                 break
 
+            scroll_el = self._get_scroll_origin_for_item(
+                xpath,
+                fallback_xpath=scroll_origin_xpath,
+            )
+            scroll_info = self._describe_element(scroll_el)
+            amount = self._get_scroll_amount_toward(last_info, scroll_amount)
             logger.info(
-                "visible item not found; scroll dropdown: xpath=%s attempt=%d last=%s",
+                "visible item not found; scroll dropdown: xpath=%s attempt=%d amount=%s origin=%s last=%s",
                 xpath,
                 attempt + 1,
+                amount,
+                scroll_info,
                 last_info,
             )
-            self.scroll_wheel(scroll_origin_xpath, scroll_amount)
+            self.scroll_wheel(scroll_el, amount)
             time.sleep(0.25)
 
         raise selenium.common.exceptions.MoveTargetOutOfBoundsException(
             f"no visibly clickable item found: xpath={xpath} last={last_info}"
         )
 
-    def scroll_wheel(self, origin_xpath=None, amount=240):
-        if origin_xpath is not None:
-            origin_el = self.driver.find_element(By.XPATH, origin_xpath)
-        else:
+    def scroll_wheel(self, origin=None, amount=240):
+        if origin is None:
             origin_el = self.driver.find_element(By.TAG_NAME, "body")
+        elif isinstance(origin, str):
+            origin_el = self.driver.find_element(By.XPATH, origin)
+        else:
+            origin_el = origin
 
+        offsets = self._get_visible_scroll_origin_offsets(origin_el)
+        logger.info(
+            "mouse wheel target: amount=%s offsets=%s origin=%s",
+            amount,
+            offsets,
+            self._describe_element(origin_el),
+        )
         ac = ActionChains(self.driver, duration=80)
-        ac.scroll_from_origin(ScrollOrigin.from_element(origin_el), 0, amount)
+        ac.scroll_from_origin(
+            ScrollOrigin.from_element(
+                origin_el,
+                int(offsets["x"]),
+                int(offsets["y"]),
+            ),
+            0,
+            amount,
+        )
         ac.perform()
+
+    def _get_scroll_origin_for_item(self, xpath, fallback_xpath=None):
+        candidates = self.driver.find_elements(By.XPATH, xpath)
+        if candidates:
+            origin = self.driver.execute_script(
+                """
+                const el = arguments[0];
+                let candidate = null;
+                let node = el.parentElement;
+                while (node && node !== document.documentElement) {
+                    const scrollable = node.scrollHeight > node.clientHeight + 2;
+                    const style = window.getComputedStyle(node);
+                    const overflowY = style.overflowY || "";
+                    if (scrollable && overflowY !== "visible" && overflowY !== "hidden") {
+                        return node;
+                    }
+                    if (scrollable && candidate === null) {
+                        candidate = node;
+                    }
+                    node = node.parentElement;
+                }
+                return candidate;
+                """,
+                candidates[0],
+            )
+            if origin is not None:
+                return origin
+
+        if fallback_xpath is not None:
+            elements = self.driver.find_elements(By.XPATH, fallback_xpath)
+            for el in reversed(elements):
+                try:
+                    width, height = self._get_element_size(el)
+                    info = self._get_element_point_visibility(
+                        el, (width / 2, height / 2)
+                    )
+                    if info["clickable"]:
+                        return el
+                except selenium.common.exceptions.StaleElementReferenceException:
+                    continue
+            if elements:
+                return elements[-1]
+
+        return self.driver.find_element(By.TAG_NAME, "body")
+
+    def _get_scroll_amount_toward(self, info, default_amount):
+        if not info:
+            return default_amount
+
+        target_y = info.get("topTargetY", info.get("targetY", 0))
+        viewport_height = info.get(
+            "topViewportHeight",
+            info.get("viewportHeight", self.driver.get_window_size()["height"]),
+        )
+        if target_y < 80:
+            return -abs(default_amount)
+        if target_y > viewport_height - 120:
+            return abs(default_amount)
+        return abs(default_amount)
+
+    def _describe_element(self, el):
+        return self.driver.execute_script(
+            """
+            const el = arguments[0];
+            if (!el) {
+                return null;
+            }
+            const rect = el.getBoundingClientRect();
+            const className =
+                el.className && el.className.baseVal !== undefined
+                    ? el.className.baseVal
+                    : String(el.className || "");
+            return {
+                tagName: el.tagName,
+                className,
+                rect: {
+                    left: rect.left,
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                },
+                scrollTop: el.scrollTop,
+                scrollHeight: el.scrollHeight,
+                clientHeight: el.clientHeight,
+            };
+            """,
+            el,
+        )
+
+    def _get_visible_scroll_origin_offsets(self, el):
+        return self.driver.execute_script(
+            """
+            const el = arguments[0];
+            const rect = el.getBoundingClientRect();
+            const visibleLeft = Math.max(rect.left, 0);
+            const visibleTop = Math.max(rect.top, 0);
+            const visibleRight = Math.min(rect.right, window.innerWidth);
+            const visibleBottom = Math.min(rect.bottom, window.innerHeight);
+            const centerX = (rect.left + rect.right) / 2;
+            const centerY = (rect.top + rect.bottom) / 2;
+
+            const points = [];
+            const x = (visibleLeft + visibleRight) / 2;
+            for (const ratio of [0.2, 0.35, 0.5, 0.65, 0.8]) {
+                points.push({
+                    x,
+                    y: visibleTop + (visibleBottom - visibleTop) * ratio,
+                });
+            }
+
+            for (const point of points) {
+                const hit = document.elementFromPoint(point.x, point.y);
+                if (hit === el || el.contains(hit)) {
+                    return {
+                        x: point.x - centerX,
+                        y: point.y - centerY,
+                        hitTagName: hit ? hit.tagName : null,
+                    };
+                }
+            }
+
+            return {x: 0, y: 0, hitTagName: null};
+            """,
+            el,
+        )
 
     def scroll_into(self, xpath, timeout=10):
         driver = self.driver
