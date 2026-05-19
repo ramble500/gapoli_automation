@@ -31,10 +31,13 @@ def buy_medal(c: Controller, game_type: str='green', credit: int=10000):
     c.wait_random()
 
     # ダイアログの処理
-    c.click_it('//div[contains(@class, "_pulldown")]')
-    c.click_it(
-        f'//div[contains(@class, "_pullDownItem")]//span[contains(text(), "{credit:,}")]'
+    pulldown_xpath = '//div[contains(@class, "_pulldown")]'
+    c.click_it(pulldown_xpath)
+    credit_item_xpath = (
+        f'//div[contains(@class, "_pullDownItem")]'
+        f'[.//span[normalize-space(.)="{credit:,}"]]'
     )
+    c.click_visible_item(credit_item_xpath, scroll_origin_xpath=pulldown_xpath)
     c.wait_random()
 
     c.click_it('//button[text()="プレイ開始"]')
