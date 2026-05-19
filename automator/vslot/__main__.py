@@ -299,7 +299,7 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                         c.driver.switch_to.default_content()
 
 
-            # オート開始 (バラエティ)
+            # 手動開始 (バラエティ)
             elif IS_VARIETY:
                 b_width = 560
                 b_height = 960
@@ -308,12 +308,39 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                 button_datapanel = (35/b_width, 925/b_height)
 
                 if GAME_ID == 20205:
+                    button_spec = [
+                        (105/b_width, 255/b_height),
+                        (105/b_width, 340/b_height),
+                    ]
+                    button_bet = [
+                        (130/b_width, 540/b_height),
+                        (130/b_width, 590/b_height),
+                        (130/b_width, 640/b_height),
+                    ]
                     button_start = (300/b_width, 710/b_height)
                 
                 elif GAME_ID == 20204:
+                    button_spec = [  # 個別に処理したくないのでダミーの位置をクリック
+                        (300/b_width, 320/b_height),
+                        (300/b_width, 320/b_height),
+                    ]
+                    button_bet = [
+                        (185/b_width, 460/b_height),
+                        (185/b_width, 500/b_height),
+                        (185/b_width, 540/b_height),
+                    ]
                     button_start = (300/b_width, 605/b_height)
 
                 elif GAME_ID == 20226:
+                    button_spec = [
+                        (110/b_width, 280/b_height),
+                        (105/b_width, 355/b_height),
+                    ]
+                    button_bet = [
+                        (140/b_width, 560/b_height),
+                        (140/b_width, 610/b_height),
+                        (140/b_width, 660/b_height),
+                    ]
                     button_start = (300/b_width, 710/b_height)
 
                 # 初期設定を行う間はロック
@@ -326,14 +353,21 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                         buy_medal(c, game_type=GAME_TYPE, credit=CREDIT)
                         buy_medal(c, game_type=GAME_TYPE, credit=CREDIT)
 
-                    start_auto_9999(
-                        c,
-                        game_id=GAME_ID,
-                        game_type=GAME_TYPE,
-                        no_fast=NO_FAST,
-                    )
+                    focus_main_window(c, game_type=GAME_TYPE)
 
-                    logger.info(f'[{GAME_NAME}] オート開始 (バラエティ)')
+                    logger.info(f'[{GAME_NAME}] バラエティ設定パネル選択')
+                    c.click_relative_pos(button_auto, "//canvas")
+                    time.sleep(0.5)
+
+                    logger.info(f'[{GAME_NAME}] スペック選択 ({VARIETY_SPEC})')
+                    c.click_relative_pos(button_spec[VARIETY_SPEC - 1], "//canvas")
+                    time.sleep(0.5)
+
+                    logger.info(f'[{GAME_NAME}] ベット数選択 ({VARIETY_BET})')
+                    c.click_relative_pos(button_bet[VARIETY_BET - 1], "//canvas")
+                    time.sleep(0.5)
+
+                    logger.info(f'[{GAME_NAME}] バラエティ手動開始ループ')
 
                 # スタートボタンを押すループ (約5sec毎)
                 while True:
