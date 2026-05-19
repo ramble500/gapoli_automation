@@ -674,21 +674,80 @@ class Controller:
 
         drag_x = int(max(min(dx, 160), -160))
         drag_y = int(max(min(dy, 160), -160))
+        start_offset = self._get_drag_start_offset(drag_handle, drag_x, drag_y)
         logger.info(
-            "drag window to show target: dx=%s dy=%s info=%s",
+            "drag window to show target: dx=%s dy=%s start_offset=%s info=%s",
             drag_x,
             drag_y,
+            start_offset,
             info,
         )
         ac = ActionChains(self.driver, duration=180)
-        ac.move_to_element(drag_handle)
+        ac.move_to_element_with_offset(
+            drag_handle,
+            int(start_offset["x"]),
+            int(start_offset["y"]),
+        )
         ac.click_and_hold()
         ac.move_by_offset(drag_x, drag_y)
         ac.release()
-        ac.perform()
+        try:
+            ac.perform()
+        except selenium.common.exceptions.MoveTargetOutOfBoundsException:
+            logger.warning(
+                "window drag target was out of bounds: dx=%s dy=%s start_offset=%s info=%s",
+                drag_x,
+                drag_y,
+                start_offset,
+                info,
+                exc_info=True,
+            )
+            self._restore_frame_path(frame_path)
+            return False
         time.sleep(0.25)
         self._restore_frame_path(frame_path)
         return True
+
+    def _get_drag_start_offset(self, el, drag_x, drag_y):
+        return self.driver.execute_script(
+            """
+            const el = arguments[0];
+            const dragX = arguments[1];
+            const dragY = arguments[2];
+            const margin = 8;
+            const rect = el.getBoundingClientRect();
+            const centerX = (rect.left + rect.right) / 2;
+            const centerY = (rect.top + rect.bottom) / 2;
+
+            const startX = Math.min(
+                Math.max(centerX, margin - dragX),
+                window.innerWidth - margin - dragX
+            );
+            const startY = Math.min(
+                Math.max(centerY, margin - dragY),
+                window.innerHeight - margin - dragY
+            );
+
+            const visibleLeft = Math.max(rect.left + 2, margin);
+            const visibleRight = Math.min(rect.right - 2, window.innerWidth - margin);
+            const visibleTop = Math.max(rect.top + 2, margin);
+            const visibleBottom = Math.min(rect.bottom - 2, window.innerHeight - margin);
+
+            return {
+                x: Math.min(Math.max(startX, visibleLeft), visibleRight) - centerX,
+                y: Math.min(Math.max(startY, visibleTop), visibleBottom) - centerY,
+                rect: {
+                    left: rect.left,
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                },
+            };
+            """,
+            el,
+            drag_x,
+            drag_y,
+        )
 
     def _get_drag_handle_for_frame_path(self, frame_path):
         if not frame_path:

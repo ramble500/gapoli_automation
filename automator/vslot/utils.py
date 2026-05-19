@@ -516,17 +516,13 @@ def seat(c: Controller, rate: int = 10, credit: int = 10000, accept_payout: int 
                                 time.sleep(1)
 
                             elif is_variety:
-                                # デフォルト設定で1回転まわす
-                                logger.info('1回転まわす')
+                                # バラエティ3機種はオート機能なし。手動スタートだけ押す。
+                                logger.info('バラエティ手動で1回転まわす')
                                 b_width = 560
                                 b_height = 960
                                 button_start = (300/b_width, 710/b_height)
                                 button_start_2 = (300/b_width, 605/b_height)
 
-                                button_auto = (525/b_width, 925/b_height)
-
-                                c.click_relative_pos(button_auto, "//canvas")
-                                time.sleep(1)
                                 c.click_relative_pos(button_start, "//canvas")
                                 c.click_relative_pos(button_start_2, "//canvas")  # 場合分けが面倒なので両方押す
                                 time.sleep(20)
