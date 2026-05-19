@@ -413,12 +413,12 @@ def seat(c: Controller, rate: int = 10, credit: int = 10000, accept_payout: int 
 
         # span ではなく、その親の行(div)をクリック対象にする
         rate_item_xpath = (
-            f'(//div[contains(@class, "_pullDownItem")]'
-            f'[.//span[contains(text(), "{rate}")]])[1]'
+            f'//div[contains(@class, "_pullDownItem")]'
+            f'[.//span[normalize-space(.)="{rate}"]]'
         )
         c.wait_it(rate_item_xpath, timeout=10)
         time.sleep(0.5)
-        c.click_it(rate_item_xpath)
+        c.click_visible_item(rate_item_xpath, scroll_origin_xpath=pulldown_xpath)
         c.wait_random()
 
         c.click_it('//button[text()="レート決定"]')
@@ -430,12 +430,12 @@ def seat(c: Controller, rate: int = 10, credit: int = 10000, accept_payout: int 
         c.click_it(pulldown_xpath)
 
         credit_item_xpath = (
-            f'(//div[contains(@class, "_pullDownItem")]'
-            f'[.//span[contains(text(), "{credit:,}")]])[1]'
+            f'//div[contains(@class, "_pullDownItem")]'
+            f'[.//span[normalize-space(.)="{credit:,}"]]'
         )
         c.wait_it(credit_item_xpath, timeout=10)
         time.sleep(0.5)
-        c.click_it(credit_item_xpath)
+        c.click_visible_item(credit_item_xpath, scroll_origin_xpath=pulldown_xpath)
         c.wait_random()
 
         c.driver.execute_cdp_cmd("Network.enable", {})

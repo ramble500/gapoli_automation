@@ -26,6 +26,7 @@ import csv
 from automator.login import Controller
 from automator.utils.influx import init_influx
 from automator.utils.initial import initial_action
+from automator.utils.logging_config import setup_file_logging
 
 parser = argparse.ArgumentParser()
 
@@ -57,9 +58,9 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-logging.basicConfig(level=args.loglevel.upper())
-logging.getLogger().setLevel(args.loglevel.upper())
+LOG_PATH = setup_file_logging(args.loglevel, "vslot_search")
 logger = logging.getLogger(__name__)
+logger.info("log file: %s", LOG_PATH)
 
 ACCEPT_PAYOUT = args.accept_payout
 NO_MUTE = args.no_mute

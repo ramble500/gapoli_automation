@@ -14,6 +14,7 @@ import numpy as np
 import selenium
 from PIL import Image, ImageFile
 from selenium.webdriver import Chrome, ChromeOptions
+from selenium.webdriver.common.actions.wheel_input import ScrollOrigin
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -147,6 +148,68 @@ class Controller:
     def click_element(self, el):
         width, height = self._get_element_size(el)
         self._click_element_point_with_mouse(el, (width / 2, height / 2))
+
+    def click_visible_item(
+        self,
+        xpath,
+        scroll_origin_xpath=None,
+        timeout=10,
+        max_scrolls=10,
+        scroll_amount=240,
+    ):
+        driver = self.driver
+        WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.XPATH, xpath))
+        )
+
+        last_info = None
+        for attempt in range(max_scrolls + 1):
+            for el in driver.find_elements(By.XPATH, xpath):
+                try:
+                    width, height = self._get_element_size(el)
+                    info = self._get_element_point_visibility(
+                        el, (width / 2, height / 2)
+                    )
+                    last_info = info
+                    if info["clickable"]:
+                        logger.info(
+                            "visible item selected: xpath=%s attempt=%d info=%s",
+                            xpath,
+                            attempt,
+                            info,
+                        )
+                        self._click_element_point_with_mouse(
+                            el, (width / 2, height / 2)
+                        )
+                        return
+                except selenium.common.exceptions.StaleElementReferenceException:
+                    continue
+
+            if attempt >= max_scrolls:
+                break
+
+            logger.info(
+                "visible item not found; scroll dropdown: xpath=%s attempt=%d last=%s",
+                xpath,
+                attempt + 1,
+                last_info,
+            )
+            self.scroll_wheel(scroll_origin_xpath, scroll_amount)
+            time.sleep(0.25)
+
+        raise selenium.common.exceptions.MoveTargetOutOfBoundsException(
+            f"no visibly clickable item found: xpath={xpath} last={last_info}"
+        )
+
+    def scroll_wheel(self, origin_xpath=None, amount=240):
+        if origin_xpath is not None:
+            origin_el = self.driver.find_element(By.XPATH, origin_xpath)
+        else:
+            origin_el = self.driver.find_element(By.TAG_NAME, "body")
+
+        ac = ActionChains(self.driver, duration=80)
+        ac.scroll_from_origin(ScrollOrigin.from_element(origin_el), 0, amount)
+        ac.perform()
 
     def scroll_into(self, xpath, timeout=10):
         driver = self.driver
