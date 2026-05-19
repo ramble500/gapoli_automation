@@ -607,14 +607,28 @@ class Controller:
         context: bool = False,
         pause: float = 0.04,
     ):
-        self._scroll_element_point_into_view(el, pos)
-        info = self._get_element_point_visibility(el, pos)
-        if not info["clickable"]:
+        frame_path = self._get_frame_path_to_top()
+        for attempt in range(2):
+            self._scroll_element_point_into_view(el, pos)
+            info = self._get_element_point_visibility(el, pos)
+            if info["clickable"]:
+                break
+
+            if (
+                not info["topInViewport"]
+                and info["targetReceivesClick"]
+                and self._drag_window_to_show_top_target(info, frame_path)
+            ):
+                logger.info(
+                    "target was outside top viewport; retried after window drag: %s",
+                    info,
+                )
+                continue
+
             raise selenium.common.exceptions.MoveTargetOutOfBoundsException(
                 f"target point is not visibly clickable: {info}"
             )
 
-        frame_path = self._get_frame_path_to_top()
         try:
             self.driver.switch_to.default_content()
             target = self._get_top_viewport_click_origin(info)
@@ -634,6 +648,94 @@ class Controller:
             ac.perform()
         finally:
             self._restore_frame_path(frame_path)
+
+    def _drag_window_to_show_top_target(self, info, frame_path):
+        margin = 24
+        dx = 0
+        dy = 0
+        if info["topTargetX"] < margin:
+            dx = margin - info["topTargetX"]
+        elif info["topTargetX"] > info["topViewportWidth"] - margin:
+            dx = (info["topViewportWidth"] - margin) - info["topTargetX"]
+
+        if info["topTargetY"] < margin:
+            dy = margin - info["topTargetY"]
+        elif info["topTargetY"] > info["topViewportHeight"] - margin:
+            dy = (info["topViewportHeight"] - margin) - info["topTargetY"]
+
+        if dx == 0 and dy == 0:
+            return False
+
+        self.driver.switch_to.default_content()
+        drag_handle = self._get_drag_handle_for_frame_path(frame_path)
+        if drag_handle is None:
+            self._restore_frame_path(frame_path)
+            return False
+
+        drag_x = int(max(min(dx, 160), -160))
+        drag_y = int(max(min(dy, 160), -160))
+        logger.info(
+            "drag window to show target: dx=%s dy=%s info=%s",
+            drag_x,
+            drag_y,
+            info,
+        )
+        ac = ActionChains(self.driver, duration=180)
+        ac.move_to_element(drag_handle)
+        ac.click_and_hold()
+        ac.move_by_offset(drag_x, drag_y)
+        ac.release()
+        ac.perform()
+        time.sleep(0.25)
+        self._restore_frame_path(frame_path)
+        return True
+
+    def _get_drag_handle_for_frame_path(self, frame_path):
+        if not frame_path:
+            return None
+
+        return self.driver.execute_script(
+            """
+            const path = arguments[0];
+            let doc = document;
+            let frame = null;
+            for (const frameIndex of path) {
+                const frames = Array.from(doc.querySelectorAll("iframe,frame"));
+                frame = frames[frameIndex];
+                if (!frame) {
+                    return null;
+                }
+                doc = frame.contentDocument || frame.contentWindow.document;
+            }
+
+            const container =
+                frame.closest('div[class*="green"], div[class*="pink"]') ||
+                frame.parentElement;
+            if (!container) {
+                return frame;
+            }
+
+            const handles = Array.from(
+                container.querySelectorAll(
+                    '[class*="header-info"], [class*="_header-info"], [class*="header"]'
+                )
+            );
+            for (const handle of handles) {
+                const rect = handle.getBoundingClientRect();
+                const style = window.getComputedStyle(handle);
+                if (
+                    rect.width > 0 &&
+                    rect.height > 0 &&
+                    style.display !== "none" &&
+                    style.visibility !== "hidden"
+                ) {
+                    return handle;
+                }
+            }
+            return container;
+            """,
+            frame_path,
+        )
 
     def _get_top_viewport_click_origin(self, info):
         target = self.driver.execute_script(
