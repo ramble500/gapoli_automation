@@ -304,9 +304,6 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                 b_width = 560
                 b_height = 960
 
-                button_auto = (525/b_width, 925/b_height)
-                button_datapanel = (35/b_width, 925/b_height)
-
                 if GAME_ID == 20205:
                     button_spec = [
                         (105/b_width, 255/b_height),
@@ -355,10 +352,6 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
 
                     focus_main_window(c, game_type=GAME_TYPE)
 
-                    logger.info(f'[{GAME_NAME}] バラエティ設定パネル選択')
-                    c.click_relative_pos(button_auto, "//canvas")
-                    time.sleep(0.5)
-
                     logger.info(f'[{GAME_NAME}] スペック選択 ({VARIETY_SPEC})')
                     c.click_relative_pos(button_spec[VARIETY_SPEC - 1], "//canvas")
                     time.sleep(0.5)
@@ -391,9 +384,6 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
 
                             focus_main_window(c, game_type=GAME_TYPE)
 
-                            # オートを解除しないと総ベット数のダイアログが出ない
-                            c.click_relative_pos(button_auto, "//canvas")
-                            c.click_relative_pos(button_datapanel, "//canvas")
                             c.wait_random()
                             result_path = f"./log/vs_result_ss/vs_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.png"
                             Path(result_path).parent.mkdir(parents=True, exist_ok=True)

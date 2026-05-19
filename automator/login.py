@@ -608,7 +608,9 @@ class Controller:
         pause: float = 0.04,
     ):
         frame_path = self._get_frame_path_to_top()
-        for attempt in range(2):
+        info = None
+        max_attempts = 3
+        for attempt in range(max_attempts):
             self._scroll_element_point_into_view(el, pos)
             info = self._get_element_point_visibility(el, pos)
             if info["clickable"]:
@@ -617,6 +619,7 @@ class Controller:
             if (
                 not info["topInViewport"]
                 and info["targetReceivesClick"]
+                and attempt < max_attempts - 1
                 and self._drag_window_to_show_top_target(info, frame_path)
             ):
                 logger.info(
@@ -627,6 +630,11 @@ class Controller:
 
             raise selenium.common.exceptions.MoveTargetOutOfBoundsException(
                 f"target point is not visibly clickable: {info}"
+            )
+
+        if info is None or not info["clickable"]:
+            raise selenium.common.exceptions.MoveTargetOutOfBoundsException(
+                f"target point is not visibly clickable after retries: {info}"
             )
 
         try:
