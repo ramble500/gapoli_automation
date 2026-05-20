@@ -306,7 +306,9 @@ def start_auto_9999(c: Controller, game_id: int, game_type: str='green', no_fast
     b_width = 560
     b_height = 960
 
-    button_auto_menu = (525 / b_width, 925 / b_height)
+    # Use a visible point inside the lower-right round auto button; the center
+    # can be clipped by the iframe on short viewports.
+    button_auto_menu = (525 / b_width, 910 / b_height)
     if game_id == 20246:
         button_spin_count_9999 = (0.63, 0.44)
         button_fast_auto = (0.2, 0.5)
