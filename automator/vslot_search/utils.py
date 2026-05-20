@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 from typing import List
 
+from selenium.common.exceptions import TimeoutException
+
 from automator.login import Controller
 from automator.utils.influx import write_influx
 from automator.vslot.utils import shrink_window_if_clipped
@@ -175,6 +177,26 @@ def take_game_store(c):
             return fields
 
 
+def select_search_dropdown_item(
+    c: Controller,
+    item_xpath: str,
+    pulldown_xpath: str,
+    label: str,
+    timeout: int = 10,
+) -> bool:
+    try:
+        c.wait_it(item_xpath, timeout=timeout)
+    except TimeoutException:
+        logger.warning("search option not found; skip machine: %s", label)
+        c.driver.switch_to.default_content()
+        return False
+
+    time.sleep(0.5)
+    c.click_visible_item(item_xpath, scroll_origin_xpath=pulldown_xpath)
+    c.wait_random()
+    return True
+
+
 def seat_and_check_payout(c: Controller, game_id: int, is_bingo: bool=False, is_variety: bool=False) -> int:
     game_type = 'pink' if is_variety else 'green'
     rate = 1
@@ -194,10 +216,13 @@ def seat_and_check_payout(c: Controller, game_id: int, is_bingo: bool=False, is_
         f'//div[contains(@class, "_pullDownItem")]'
         f'[.//span[normalize-space(.)="{rate}"]]'
     )
-    c.wait_it(rate_item_xpath, timeout=10)
-    time.sleep(0.5)
-    c.click_visible_item(rate_item_xpath, scroll_origin_xpath=pulldown_xpath)
-    c.wait_random()
+    if not select_search_dropdown_item(
+        c,
+        rate_item_xpath,
+        pulldown_xpath,
+        f"rate={rate} game_id={game_id}",
+    ):
+        return 0
 
     c.click_it('//button[text()="レート決定"]')
     c.wait_random()
@@ -211,10 +236,13 @@ def seat_and_check_payout(c: Controller, game_id: int, is_bingo: bool=False, is_
         f'//div[contains(@class, "_pullDownItem")]'
         f'[.//span[normalize-space(.)="{credit:,}"]]'
     )
-    c.wait_it(credit_item_xpath, timeout=10)
-    time.sleep(0.5)
-    c.click_visible_item(credit_item_xpath, scroll_origin_xpath=pulldown_xpath)
-    c.wait_random()
+    if not select_search_dropdown_item(
+        c,
+        credit_item_xpath,
+        pulldown_xpath,
+        f"credit={credit:,} game_id={game_id}",
+    ):
+        return 0
 
     c.driver.execute_cdp_cmd("Network.enable", {})
     c.driver.execute_cdp_cmd("Network.setCacheDisabled", {"cacheDisabled": True})
