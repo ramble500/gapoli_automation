@@ -363,8 +363,19 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                     logger.info(f'[{GAME_NAME}] バラエティ手動開始ループ')
 
                 # スタートボタンを押すループ (約5sec毎)
+                last_credit = None
+                stall_count = 0
                 while True:
                     with processing_lock:
+                        c.driver.switch_to.default_content()
+                        result_area = c.get_element(
+                            f'//div[contains(@class, "{GAME_TYPE}")]//div[contains(@class, "resultArea")]'
+                        )
+                        if result_area is not None and result_area.is_displayed():
+                            logger.warning(f"[{GAME_NAME}] 結果画面を検知 精算開始.")
+                            finish_game(c, game_type=GAME_TYPE)
+                            break
+
                         focus_main_window(c, game_type=GAME_TYPE)
                         c.click_relative_pos(button_start, "//canvas")
                         time.sleep(0.5)
@@ -411,6 +422,28 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                             )
                             c.wait_random()
                             finish_game(c, from_dialog=True)
+                        break
+
+                    try:
+                        game_store = take_game_store(c, no_influx=NO_INFLUX)
+                        current_credit = game_store["medal"] if game_store else None
+                    except Exception:
+                        current_credit = None
+
+                    if current_credit is not None:
+                        if last_credit is None or current_credit != last_credit:
+                            last_credit = current_credit
+                            stall_count = 0
+                        else:
+                            stall_count += 1
+                            logger.info(
+                                f"[{GAME_NAME}] バラエティ手動ループ credit変化なし ({stall_count})"
+                            )
+
+                    if stall_count >= 8:
+                        logger.warning(f"[{GAME_NAME}] バラエティ手動ループ停止 精算開始.")
+                        with processing_lock:
+                            finish_game(c, game_type=GAME_TYPE)
                         break
                     
                     time.sleep(4.5)
