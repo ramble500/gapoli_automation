@@ -133,17 +133,56 @@ class Controller:
         self.driver.close()
 
     def click_it(self, xpath, timeout=10):
-        driver = self.driver
-        WebDriverWait(driver, timeout).until(
-            EC.element_to_be_clickable((By.XPATH, xpath))
+        deadline = time.monotonic() + timeout
+        last_info = None
+        last_exception = None
+        next_log_at = 0
+
+        while time.monotonic() < deadline:
+            found = False
+            for el in self.driver.find_elements(By.XPATH, xpath):
+                found = True
+                try:
+                    width, height = self._get_element_size(el)
+                    info = self._get_element_point_visibility(
+                        el, (width / 2, height / 2)
+                    )
+                    last_info = info
+                    if not info["clickable"]:
+                        continue
+
+                    remaining = max(0.2, deadline - time.monotonic())
+                    self._click_element_point_with_mouse(
+                        el, (width / 2, height / 2), timeout=remaining
+                    )
+                    return
+                except selenium.common.exceptions.StaleElementReferenceException as e:
+                    last_exception = e
+                    continue
+                except selenium.common.exceptions.MoveTargetOutOfBoundsException as e:
+                    last_exception = e
+                    continue
+
+            now = time.monotonic()
+            if now >= next_log_at:
+                logger.info(
+                    "waiting for visibly clickable target: xpath=%s found=%s last=%s",
+                    xpath,
+                    found,
+                    last_info,
+                )
+                next_log_at = now + 1.0
+            time.sleep(0.2)
+
+        if last_info is not None:
+            raise selenium.common.exceptions.MoveTargetOutOfBoundsException(
+                f"target did not become visibly clickable: xpath={xpath} last={last_info}"
+            )
+        if last_exception is not None:
+            raise last_exception
+        raise selenium.common.exceptions.TimeoutException(
+            f"target was not found before timeout: xpath={xpath}"
         )
-        for i in range(10):
-            try:
-                el = driver.find_element(By.XPATH, xpath)
-                self.click_element(el)
-            except selenium.common.exceptions.StaleElementReferenceException:
-                continue
-            break
 
     def click_element(self, el):
         width, height = self._get_element_size(el)
@@ -405,9 +444,14 @@ class Controller:
     def wait_random(self, sec=1.0):
         self.wait(sec * (random.random() * 0.6 + 0.7))
 
-    def wait_loaded(self):
+    def wait_loaded(self, timeout=30):
         driver = self.driver
-        WebDriverWait(driver, 10).until(EC.presence_of_all_elements_located)
+        WebDriverWait(driver, timeout).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
+        WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
+        )
 
     def wait_forever(self):
         logger.info("WAIT FOREVER...")
@@ -606,35 +650,48 @@ class Controller:
         pos: Tuple[float, float],
         context: bool = False,
         pause: float = 0.04,
+        timeout: float = 10.0,
     ):
         frame_path = self._get_frame_path_to_top()
         info = None
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            self._scroll_element_point_into_view(el, pos)
-            info = self._get_element_point_visibility(el, pos)
-            if info["clickable"]:
+        deadline = time.monotonic() + timeout
+        next_log_at = 0
+
+        while time.monotonic() < deadline:
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                self._scroll_element_point_into_view(el, pos)
+                info = self._get_element_point_visibility(el, pos)
+                if info["clickable"]:
+                    break
+
+                if (
+                    not info["topInViewport"]
+                    and info["targetReceivesClick"]
+                    and attempt < max_attempts - 1
+                    and self._drag_window_to_show_top_target(info, frame_path)
+                ):
+                    logger.info(
+                        "target was outside top viewport; retried after window drag: %s",
+                        info,
+                    )
+                    continue
+
                 break
 
-            if (
-                not info["topInViewport"]
-                and info["targetReceivesClick"]
-                and attempt < max_attempts - 1
-                and self._drag_window_to_show_top_target(info, frame_path)
-            ):
-                logger.info(
-                    "target was outside top viewport; retried after window drag: %s",
-                    info,
-                )
-                continue
+            if info is not None and info["clickable"]:
+                break
 
-            raise selenium.common.exceptions.MoveTargetOutOfBoundsException(
-                f"target point is not visibly clickable: {info}"
-            )
+            now = time.monotonic()
+            if now >= next_log_at:
+                logger.info("waiting for visibly clickable point: %s", info)
+                next_log_at = now + 1.0
+            time.sleep(0.2)
 
         if info is None or not info["clickable"]:
+            self._restore_frame_path(frame_path)
             raise selenium.common.exceptions.MoveTargetOutOfBoundsException(
-                f"target point is not visibly clickable after retries: {info}"
+                f"target point did not become visibly clickable: {info}"
             )
 
         try:
