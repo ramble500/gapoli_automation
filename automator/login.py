@@ -929,8 +929,14 @@ class Controller:
                     break;
                 }
                 const frameRect = frameElement.getBoundingClientRect();
-                topTargetX += frameRect.left;
-                topTargetY += frameRect.top;
+                const scaleX = frameWindow.innerWidth
+                    ? frameRect.width / frameWindow.innerWidth
+                    : 1;
+                const scaleY = frameWindow.innerHeight
+                    ? frameRect.height / frameWindow.innerHeight
+                    : 1;
+                topTargetX = frameRect.left + topTargetX * scaleX;
+                topTargetY = frameRect.top + topTargetY * scaleY;
                 topFrameElement = frameElement;
                 frameWindow = frameWindow.parent;
             }
