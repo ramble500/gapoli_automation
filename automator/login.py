@@ -165,7 +165,7 @@ class Controller:
 
             now = time.monotonic()
             if now >= next_log_at:
-                logger.info(
+                logger.debug(
                     "waiting for visibly clickable target: xpath=%s found=%s last=%s",
                     xpath,
                     found,
@@ -211,7 +211,7 @@ class Controller:
                     )
                     last_info = info
                     if info["clickable"]:
-                        logger.info(
+                        logger.debug(
                             "visible item selected: xpath=%s attempt=%d info=%s",
                             xpath,
                             attempt,
@@ -233,7 +233,7 @@ class Controller:
             )
             scroll_info = self._describe_element(scroll_el)
             amount = self._get_scroll_amount_toward(last_info, scroll_amount)
-            logger.info(
+            logger.debug(
                 "visible item not found; scroll dropdown: xpath=%s attempt=%d amount=%s origin=%s last=%s",
                 xpath,
                 attempt + 1,
@@ -257,7 +257,7 @@ class Controller:
             origin_el = origin
 
         offsets = self._get_visible_scroll_origin_offsets(origin_el)
-        logger.info(
+        logger.debug(
             "mouse wheel target: amount=%s offsets=%s origin=%s",
             amount,
             offsets,
@@ -671,7 +671,7 @@ class Controller:
                     and attempt < max_attempts - 1
                     and self._drag_window_to_show_top_target(info, frame_path)
                 ):
-                    logger.info(
+                    logger.debug(
                         "target was outside top viewport; retried after window drag: %s",
                         info,
                     )
@@ -684,7 +684,7 @@ class Controller:
 
             now = time.monotonic()
             if now >= next_log_at:
-                logger.info("waiting for visibly clickable point: %s", info)
+                logger.debug("waiting for visibly clickable point: %s", info)
                 next_log_at = now + 1.0
             time.sleep(0.2)
 
@@ -697,7 +697,7 @@ class Controller:
         try:
             self.driver.switch_to.default_content()
             target = self._get_top_viewport_click_origin(info)
-            logger.info(f"mouse click target: {target['log']}")
+            logger.debug("mouse click target: %s", target["log"])
             ac = ActionChains(self.driver, duration=int(pause * 1000))
             ac.move_to_element_with_offset(
                 target["element"],
@@ -740,7 +740,7 @@ class Controller:
         drag_x = int(max(min(dx, 160), -160))
         drag_y = int(max(min(dy, 160), -160))
         start_offset = self._get_drag_start_offset(drag_handle, drag_x, drag_y)
-        logger.info(
+        logger.debug(
             "drag window to show target: dx=%s dy=%s start_offset=%s info=%s",
             drag_x,
             drag_y,

@@ -21,7 +21,6 @@ from automator.vslot.utils import (
     start_auto_9999,
     move_window_to_right,
     bring_window_to_front,
-    bring_window_to_front_2
 )
 
 load_dotenv(verbose=True)
@@ -255,7 +254,6 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
 
                             # 精算処理を行う間はロック
                             with processing_lock:
-                                bring_window_to_front_2(c, GAME_TYPE)
                                 c.click_it(
                                     f'//div[contains(@class, "{GAME_TYPE}")]//span[contains(text(),"クレジット")]/../..//button[text()="閉じる"]'
                                 )
@@ -278,7 +276,6 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                         logger.warning(f"[{GAME_NAME}] 完走 精算開始.")
                         # 精算処理を行う間はロック
                         with processing_lock:
-                            bring_window_to_front_2(c, GAME_TYPE)
                             c.click_it(
                                 f'//div[contains(@class, "{GAME_TYPE}")]//span[contains(text(),"プレイ回数が上限")]/../..//button[text()="精算"]'
                             )
@@ -388,7 +385,6 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                         logger.warning(f"[{GAME_NAME}] Credit 切れ 精算開始.")
                         # 精算処理を行う間はロック
                         with processing_lock:
-                            bring_window_to_front_2(c, GAME_TYPE)
                             c.click_it(
                                 f'//div[contains(@class, "{GAME_TYPE}")]//span[contains(text(),"クレジット")]/../..//button[text()="閉じる"]'
                             )
@@ -411,7 +407,6 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                         logger.warning(f"[{GAME_NAME}] 完走 精算開始.")
                         # 精算処理を行う間はロック
                         with processing_lock:
-                            bring_window_to_front_2(c, GAME_TYPE)
                             c.click_it(
                                 f'//div[contains(@class, "{GAME_TYPE}")]//span[contains(text(),"プレイ回数が上限")]/../..//button[text()="精算"]'
                             )
@@ -517,7 +512,6 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                             logger.warning(f"[{GAME_NAME}] Credit 切れ 精算開始.")
                             # 精算処理を行う間はロック
                             with processing_lock:
-                                bring_window_to_front_2(c, GAME_TYPE)
                                 c.click_it(
                                     f'//div[contains(@class, "{GAME_TYPE}")]//span[contains(text(),"クレジット")]/../..//button[text()="閉じる"]'
                                 )
@@ -546,7 +540,6 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                             logger.warning(f"[{GAME_NAME}] 完走 精算開始.")
                             # 精算処理を行う間はロック
                             with processing_lock:
-                                bring_window_to_front_2(c, GAME_TYPE)
                                 c.click_it(
                                     f'//div[contains(@class, "{GAME_TYPE}")]//span[contains(text(),"プレイ回数が上限")]/../..//button[text()="精算"]'
                                 )
