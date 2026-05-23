@@ -554,9 +554,11 @@ def seat(c: Controller, rate: int = 10, credit: int = 10000, accept_payout: int 
                                     button_reel_auto = (525/b_width, 925/b_height)
                                     c.click_relative_pos(button_reel_auto, "//canvas")
                                     time.sleep(1)
+                                    c.click_relative_pos(button_start, "//canvas")
+                                else:
+                                    c.click_relative_pos(button_start, "//canvas")
+                                    c.click_relative_pos(button_start_2, "//canvas")  # 場合分けが面倒なので両方押す
 
-                                c.click_relative_pos(button_start, "//canvas")
-                                c.click_relative_pos(button_start_2, "//canvas")  # 場合分けが面倒なので両方押す
                                 time.sleep(20)
 
                             else:

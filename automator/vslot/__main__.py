@@ -397,7 +397,6 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                     ]
                     button_start_candidates = [
                         (300/b_width, 710/b_height),
-                        (300/b_width, 605/b_height),
                     ]
                 
                 elif GAME_ID == 20204:
@@ -412,7 +411,6 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                     ]
                     button_start_candidates = [
                         (300/b_width, 605/b_height),
-                        (300/b_width, 710/b_height),
                     ]
 
                 elif GAME_ID == 20226:
@@ -427,7 +425,6 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                     ]
                     button_start_candidates = [
                         (300/b_width, 710/b_height),
-                        (300/b_width, 605/b_height),
                     ]
 
                 # 初期設定を行う間はロック
