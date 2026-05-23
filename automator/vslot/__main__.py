@@ -147,6 +147,50 @@ logger.info(LOGIN_ID)
 c = Controller(headless=False, network_logging=True, no_mute=NO_MUTE)
 
 
+def read_game_medal(
+    game_category: int,
+    game_id: int,
+    game_name: str,
+) -> int | None:
+    game_store = take_game_store(
+        c,
+        no_influx=NO_INFLUX,
+        game_category=game_category,
+        game_id=game_id,
+        game_name=game_name,
+    )
+    return game_store["medal"] if game_store else None
+
+
+def wait_for_game_medal_change(
+    processing_lock: threading.Lock,
+    game_category: int,
+    game_id: int,
+    game_name: str,
+    before_medal: int | None,
+    timeout: float = 25.0,
+) -> bool:
+    if before_medal is None:
+        return False
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(2.0)
+        with processing_lock:
+            current_medal = read_game_medal(game_category, game_id, game_name)
+
+        if current_medal is not None and current_medal != before_medal:
+            logger.info(
+                "[%s] credit変化を確認: %s -> %s",
+                game_name,
+                before_medal,
+                current_medal,
+            )
+            return True
+
+    return False
+
+
 def game_loop(GAME_ID: int, processing_lock: threading.Lock):
     global POSITION_STACK
     with ErrorReporter(c):
@@ -172,12 +216,21 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
             with processing_lock:
                 logger.warning(f"[{GAME_NAME}] {GAME_ID} 着席処理の開始")
                 c.driver.switch_to.default_content()
-                stores = take_store(c)
+                stores = take_store(c) or {}
                 logger.debug(stores)
+                game_info_by_id = take_store_all(c)["entities"]["game"] if stores else {}
 
                 for item in stores.values():
                     a_game_category = 2 if IS_VARIETY else 5
-                    if item["gameCategory"] == a_game_category:
+                    try:
+                        select_game_key_id = item.get("selectGameKeyId")
+                        same_game = int(select_game_key_id) == GAME_ID
+                        if not same_game:
+                            official_name = game_info_by_id.get(str(select_game_key_id), {}).get("official_name")
+                            same_game = official_name == GAME_NAME
+                    except Exception:
+                        same_game = False
+                    if item["gameCategory"] == a_game_category and same_game:
                         seated = True
 
                 # 台を確保
@@ -210,19 +263,37 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
             # オート開始 (通常カジノ台)
             if not IS_BINGO and not IS_VARIETY:
 
-                # オート開始処理を行う間はロック
-                with processing_lock:
-                    bring_window_to_front(c, game_type=GAME_TYPE)
-                    start_auto_9999(
-                        c,
-                        game_id=GAME_ID,
-                        game_type=GAME_TYPE,
-                        no_fast=NO_FAST,
+                auto_started = False
+                for auto_attempt in range(1, 3):
+                    # オート開始処理を行う間はロック
+                    with processing_lock:
+                        before_auto_medal = read_game_medal(5, GAME_ID, GAME_NAME)
+                        bring_window_to_front(c, game_type=GAME_TYPE)
+                        start_auto_9999(
+                            c,
+                            game_id=GAME_ID,
+                            game_type=GAME_TYPE,
+                            no_fast=NO_FAST,
+                        )
+
+                        c.driver.switch_to.default_content()
+
+                    logger.warning(f"[{GAME_NAME}] オート開始設定を実行 ({auto_attempt}/2).")
+                    auto_started = wait_for_game_medal_change(
+                        processing_lock,
+                        5,
+                        GAME_ID,
+                        GAME_NAME,
+                        before_auto_medal,
                     )
+                    if auto_started:
+                        logger.warning(f"[{GAME_NAME}] オート開始をcredit変化で確認.")
+                        break
 
-                    c.driver.switch_to.default_content()
+                    logger.warning(f"[{GAME_NAME}] オート開始後のcredit変化なし。再設定します.")
 
-                logger.warning(f"[{GAME_NAME}] オート開始.")
+                if not auto_started:
+                    logger.warning(f"[{GAME_NAME}] オート開始確認失敗。スペース補助ループで監視継続.")
                 
                 # スペースキーを押す間隔の設定
                 # 0.65 くじらさん
@@ -243,12 +314,21 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
 
                 for i in range(100000):
                     with processing_lock:
-                        v = take_game_store(c, no_influx=NO_INFLUX)
+                        v = take_game_store(
+                            c,
+                            no_influx=NO_INFLUX,
+                            game_category=5,
+                            game_id=GAME_ID,
+                            game_name=GAME_NAME,
+                        )
 
-                    if v["medal"] < 100:
-                        if c.get_element(
-                            f'//div[contains(@class, "{GAME_TYPE}")]//span[contains(text(),"クレジット")]/../..//button[text()="閉じる"]'
-                        ):
+                    if v and v["medal"] < 100:
+                        with processing_lock:
+                            c.driver.switch_to.default_content()
+                            credit_dialog_found = c.get_element(
+                                f'//div[contains(@class, "{GAME_TYPE}")]//span[contains(text(),"クレジット")]/../..//button[text()="閉じる"]'
+                            ) is not None
+                        if credit_dialog_found:
                             # 残念、尽きた
                             logger.warning(f"[{GAME_NAME}] Credit 切れ 精算開始.")
 
@@ -269,9 +349,12 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                                 finish_game(c, game_type=GAME_TYPE)
                             break
 
-                    if c.get_element(
-                        f'//div[contains(@class, "{GAME_TYPE}")]//span[contains(text(),"プレイ回数が上限")]/../..//button[text()="精算"]'
-                    ):
+                    with processing_lock:
+                        c.driver.switch_to.default_content()
+                        completed_dialog_found = c.get_element(
+                            f'//div[contains(@class, "{GAME_TYPE}")]//span[contains(text(),"プレイ回数が上限")]/../..//button[text()="精算"]'
+                        ) is not None
+                    if completed_dialog_found:
                         # 完走!
                         logger.warning(f"[{GAME_NAME}] 完走 精算開始.")
                         # 精算処理を行う間はロック
@@ -311,7 +394,10 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                         (130/b_width, 590/b_height),
                         (130/b_width, 640/b_height),
                     ]
-                    button_start = (300/b_width, 710/b_height)
+                    button_start_candidates = [
+                        (300/b_width, 710/b_height),
+                        (300/b_width, 605/b_height),
+                    ]
                 
                 elif GAME_ID == 20204:
                     button_spec = [  # 個別に処理したくないのでダミーの位置をクリック
@@ -323,7 +409,10 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                         (185/b_width, 500/b_height),
                         (185/b_width, 540/b_height),
                     ]
-                    button_start = (300/b_width, 605/b_height)
+                    button_start_candidates = [
+                        (300/b_width, 605/b_height),
+                        (300/b_width, 710/b_height),
+                    ]
 
                 elif GAME_ID == 20226:
                     button_spec = [
@@ -335,7 +424,10 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                         (140/b_width, 610/b_height),
                         (140/b_width, 660/b_height),
                     ]
-                    button_start = (300/b_width, 710/b_height)
+                    button_start_candidates = [
+                        (300/b_width, 710/b_height),
+                        (300/b_width, 605/b_height),
+                    ]
 
                 # 初期設定を行う間はロック
                 with processing_lock:
@@ -357,12 +449,28 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                     c.click_relative_pos(button_bet[VARIETY_BET - 1], "//canvas")
                     time.sleep(0.5)
 
-                    logger.info(f'[{GAME_NAME}] バラエティ手動開始ループ')
+                    logger.info(
+                        f'[{GAME_NAME}] バラエティ手動開始ループ '
+                        f'(start候補={len(button_start_candidates)})'
+                    )
 
                 # スタートボタンを押すループ (約5sec毎)
-                last_credit = None
+                with processing_lock:
+                    last_credit = read_game_medal(2, GAME_ID, GAME_NAME)
                 stall_count = 0
+                start_candidate_index = 0
+                confirmed_start_button = None
                 while True:
+                    if confirmed_start_button is None:
+                        pending_start_button = button_start_candidates[
+                            start_candidate_index % len(button_start_candidates)
+                        ]
+                        pending_start_label = start_candidate_index % len(button_start_candidates) + 1
+                        start_candidate_index += 1
+                    else:
+                        pending_start_button = confirmed_start_button
+                        pending_start_label = 0
+
                     with processing_lock:
                         c.driver.switch_to.default_content()
                         result_area = c.get_element(
@@ -370,18 +478,20 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                         )
                         if result_area is not None and result_area.is_displayed():
                             logger.warning(f"[{GAME_NAME}] 結果画面を検知 精算開始.")
-                            finish_game(c, game_type=GAME_TYPE)
+                            finish_game(c, is_variety=True, game_type=GAME_TYPE)
                             break
 
                         focus_main_window(c, game_type=GAME_TYPE)
-                        c.click_relative_pos(button_start, "//canvas")
+                        c.click_relative_pos(pending_start_button, "//canvas")
                         time.sleep(0.5)
 
-                    c.driver.switch_to.default_content()
                     # クレジット切れダイアログ検知
-                    if c.get_element(
-                        f'//div[contains(@class, "{GAME_TYPE}")]//span[contains(text(),"クレジット")]/../..//button[text()="閉じる"]'
-                    ):
+                    with processing_lock:
+                        c.driver.switch_to.default_content()
+                        credit_dialog_found = c.get_element(
+                            f'//div[contains(@class, "{GAME_TYPE}")]//span[contains(text(),"クレジット")]/../..//button[text()="閉じる"]'
+                        ) is not None
+                    if credit_dialog_found:
                         logger.warning(f"[{GAME_NAME}] Credit 切れ 精算開始.")
                         # 精算処理を行う間はロック
                         with processing_lock:
@@ -396,13 +506,16 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                             Path(result_path).parent.mkdir(parents=True, exist_ok=True)
                             c.save_ss(result_path, c.take_photo_of("//canvas"))
 
-                            finish_game(c, game_type=GAME_TYPE)
+                            finish_game(c, is_variety=True, game_type=GAME_TYPE)
                         break
 
                     # 完走ダイアログの検知
-                    if c.get_element(
-                        f'//div[contains(@class, "{GAME_TYPE}")]//span[contains(text(),"プレイ回数が上限")]/../..//button[text()="精算"]'
-                    ):
+                    with processing_lock:
+                        c.driver.switch_to.default_content()
+                        completed_dialog_found = c.get_element(
+                            f'//div[contains(@class, "{GAME_TYPE}")]//span[contains(text(),"プレイ回数が上限")]/../..//button[text()="精算"]'
+                        ) is not None
+                    if completed_dialog_found:
                         # 完走!
                         logger.warning(f"[{GAME_NAME}] 完走 精算開始.")
                         # 精算処理を行う間はロック
@@ -416,17 +529,31 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                                 '//span[text()[contains(., "精算します")]]/../..//button[text()="精算"]'
                             )
                             c.wait_random()
-                            finish_game(c, from_dialog=True)
+                            finish_game(c, from_dialog=True, is_variety=True, game_type=GAME_TYPE)
                         break
 
-                    try:
-                        game_store = take_game_store(c, no_influx=NO_INFLUX)
-                        current_credit = game_store["medal"] if game_store else None
-                    except Exception:
-                        current_credit = None
+                    with processing_lock:
+                        try:
+                            game_store = take_game_store(
+                                c,
+                                no_influx=NO_INFLUX,
+                                game_category=2,
+                                game_id=GAME_ID,
+                                game_name=GAME_NAME,
+                            )
+                            current_credit = game_store["medal"] if game_store else None
+                        except Exception:
+                            current_credit = None
 
                     if current_credit is not None:
-                        if last_credit is None or current_credit != last_credit:
+                        if last_credit is None:
+                            last_credit = current_credit
+                        elif current_credit != last_credit:
+                            if confirmed_start_button is None:
+                                confirmed_start_button = pending_start_button
+                                logger.info(
+                                    f"[{GAME_NAME}] バラエティ開始ボタン候補{pending_start_label}を確定"
+                                )
                             last_credit = current_credit
                             stall_count = 0
                         else:
@@ -434,11 +561,16 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                             logger.info(
                                 f"[{GAME_NAME}] バラエティ手動ループ credit変化なし ({stall_count})"
                             )
+                    else:
+                        stall_count += 1
+                        logger.info(
+                            f"[{GAME_NAME}] バラエティ手動ループ credit取得失敗 ({stall_count})"
+                        )
 
                     if stall_count >= 8:
                         logger.warning(f"[{GAME_NAME}] バラエティ手動ループ停止 精算開始.")
                         with processing_lock:
-                            finish_game(c, game_type=GAME_TYPE)
+                            finish_game(c, is_variety=True, game_type=GAME_TYPE)
                         break
                     
                     time.sleep(4.5)
@@ -501,7 +633,13 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                         logger.warning(f'[{GAME_NAME}] オート開始 (ビンゴ)')
                     
                         # ボーナス当選検知用
-                        last_credit = take_game_store(c, no_influx=NO_INFLUX)['medal']
+                        last_credit = take_game_store(
+                            c,
+                            no_influx=NO_INFLUX,
+                            game_category=5,
+                            game_id=GAME_ID,
+                            game_name=GAME_NAME,
+                        )['medal']
                         stall_count = 0
 
                     while True:
@@ -528,7 +666,7 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                                 Path(result_path).parent.mkdir(parents=True, exist_ok=True)
                                 c.save_ss(result_path, c.take_photo_of("//canvas"))
 
-                                finish_game(c, game_type=GAME_TYPE)
+                                finish_game(c, is_bingo=True, game_type=GAME_TYPE)
                                 bingo_finish_game = True
                             break
 
@@ -550,14 +688,20 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                                 )
                                 c.wait_random()
                                 
-                                finish_game(c, from_dialog=True)
+                                finish_game(c, from_dialog=True, is_bingo=True, game_type=GAME_TYPE)
                                 bingo_finish_game = True
                             break
 
 
                         # クレジット変動の検査
                         with processing_lock:
-                            game_store_1 = take_game_store(c, no_influx=NO_INFLUX)
+                            game_store_1 = take_game_store(
+                                c,
+                                no_influx=NO_INFLUX,
+                                game_category=5,
+                                game_id=GAME_ID,
+                                game_name=GAME_NAME,
+                            )
 
                         if not game_store_1:
                             logger.warning(f'failed to fetch credit data')
@@ -615,7 +759,13 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                                 rush_wait_count = 0
                                 while True:
                                     with processing_lock:
-                                        current_credit = take_game_store(c, no_influx=NO_INFLUX)['medal']
+                                        current_credit = take_game_store(
+                                            c,
+                                            no_influx=NO_INFLUX,
+                                            game_category=5,
+                                            game_id=GAME_ID,
+                                            game_name=GAME_NAME,
+                                        )['medal']
                                         if current_credit != last_credit:
                                             break
 

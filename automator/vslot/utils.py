@@ -223,31 +223,55 @@ def take_store(c):
 CACHED_GAME_INFO = None
 
 
-def take_game_store(c, no_influx=False):
+def take_game_store(
+    c,
+    no_influx=False,
+    game_category: int = 5,
+    game_id: int | None = None,
+    game_name: str | None = None,
+):
     global CACHED_GAME_INFO
 
     if CACHED_GAME_INFO is None:
         CACHED_GAME_INFO = take_store_all(c)["entities"]["game"]
 
     stores = take_store(c)
-    for item in stores.values():
-        if item["gameCategory"] == 5:
-            html_store = item["html"]
-            selectGameKeyId = item["selectGameKeyId"]
-            official_name = CACHED_GAME_INFO[str(selectGameKeyId)]["official_name"]
+    if not stores:
+        return None
 
-            logger.debug(f"{html_store}")
-            fields = {
-                "medal": html_store["medal"] // html_store["selectedRate"],
-                "game_name": official_name,
-                "total_coin": item["fsCoin"] + html_store["medal"],
-            }
-            if not no_influx:
-                write_influx(
-                    f"videoslot",
-                    fields,
-                )
-            return fields
+    for item in stores.values():
+        if item["gameCategory"] != game_category:
+            continue
+
+        selectGameKeyId = item["selectGameKeyId"]
+        official_name = CACHED_GAME_INFO[str(selectGameKeyId)]["official_name"]
+        if game_id is not None or game_name is not None:
+            matches_id = game_id is not None and int(selectGameKeyId) == int(game_id)
+            matches_name = game_name is not None and official_name == game_name
+            if not (matches_id or matches_name):
+                continue
+
+        html_store = item["html"]
+        if "medal" not in html_store:
+            logger.debug("game store has no medal: %s", html_store)
+            continue
+
+        selected_rate = html_store.get("selectedRate") or 1
+        logger.debug(f"{html_store}")
+        fields = {
+            "medal": html_store["medal"] // selected_rate,
+            "game_name": official_name,
+            "game_category": game_category,
+            "total_coin": item["fsCoin"] + html_store["medal"],
+        }
+        if not no_influx:
+            write_influx(
+                f"videoslot",
+                fields,
+            )
+        return fields
+
+    return None
 
 
 # ウインドウサイズを小さくする
