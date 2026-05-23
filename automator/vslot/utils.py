@@ -542,12 +542,18 @@ def seat(c: Controller, rate: int = 10, credit: int = 10000, accept_payout: int 
                                 time.sleep(1)
 
                             elif is_variety:
-                                # バラエティ3機種はオート機能なし。手動スタートだけ押す。
+                                # 北斗のオートは周回ではなくリール停止だけなので、
+                                # 捨てゲーム時も手動スタート前に一度有効化する。
                                 logger.info('バラエティ手動で1回転まわす')
                                 b_width = 560
                                 b_height = 960
                                 button_start = (300/b_width, 710/b_height)
                                 button_start_2 = (300/b_width, 605/b_height)
+
+                                if '北斗の拳' in game_name:
+                                    button_reel_auto = (525/b_width, 925/b_height)
+                                    c.click_relative_pos(button_reel_auto, "//canvas")
+                                    time.sleep(1)
 
                                 c.click_relative_pos(button_start, "//canvas")
                                 c.click_relative_pos(button_start_2, "//canvas")  # 場合分けが面倒なので両方押す

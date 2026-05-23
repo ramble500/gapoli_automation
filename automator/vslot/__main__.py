@@ -383,6 +383,7 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
             elif IS_VARIETY:
                 b_width = 560
                 b_height = 960
+                button_reel_auto = (525/b_width, 925/b_height) if GAME_ID == 20205 else None
 
                 if GAME_ID == 20205:
                     button_spec = [
@@ -441,13 +442,10 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
 
                     focus_main_window(c, game_type=GAME_TYPE)
 
-                    logger.info(f'[{GAME_NAME}] スペック選択 ({VARIETY_SPEC})')
-                    c.click_relative_pos(button_spec[VARIETY_SPEC - 1], "//canvas")
-                    time.sleep(0.5)
-
-                    logger.info(f'[{GAME_NAME}] ベット数選択 ({VARIETY_BET})')
-                    c.click_relative_pos(button_bet[VARIETY_BET - 1], "//canvas")
-                    time.sleep(0.5)
+                    if button_reel_auto is not None:
+                        logger.info(f'[{GAME_NAME}] リール停止オート有効化')
+                        c.click_relative_pos(button_reel_auto, "//canvas")
+                        time.sleep(0.5)
 
                     logger.info(
                         f'[{GAME_NAME}] バラエティ手動開始ループ '
@@ -482,6 +480,10 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                             break
 
                         focus_main_window(c, game_type=GAME_TYPE)
+                        c.click_relative_pos(button_spec[VARIETY_SPEC - 1], "//canvas")
+                        time.sleep(0.25)
+                        c.click_relative_pos(button_bet[VARIETY_BET - 1], "//canvas")
+                        time.sleep(0.25)
                         c.click_relative_pos(pending_start_button, "//canvas")
                         time.sleep(0.5)
 
