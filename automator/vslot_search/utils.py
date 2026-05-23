@@ -186,10 +186,9 @@ def select_search_dropdown_item(
 ) -> bool:
     try:
         c.wait_it(item_xpath, timeout=timeout)
-    except TimeoutException:
-        logger.warning("search option not found; skip machine: %s", label)
+    except TimeoutException as e:
         c.driver.switch_to.default_content()
-        return False
+        raise TimeoutException(f"search option not found: {label}") from e
 
     time.sleep(0.5)
     c.click_visible_item(item_xpath, scroll_origin_xpath=pulldown_xpath)
@@ -197,10 +196,21 @@ def select_search_dropdown_item(
     return True
 
 
+def get_search_exchange_settings(game_id: int, is_variety: bool) -> tuple[int, int]:
+    if is_variety:
+        return 10, 10000
+    return 1, 1000
+
+
 def seat_and_check_payout(c: Controller, game_id: int, is_bingo: bool=False, is_variety: bool=False) -> int:
     game_type = 'pink' if is_variety else 'green'
-    rate = 1
-    credit = 1000
+    rate, credit = get_search_exchange_settings(game_id, is_variety)
+    logger.info(
+        "search exchange settings: game_id=%s rate=%s credit=%s",
+        game_id,
+        rate,
+        credit,
+    )
 
     c.click_it('//button[text()="プレイ"]')
 
@@ -216,13 +226,12 @@ def seat_and_check_payout(c: Controller, game_id: int, is_bingo: bool=False, is_
         f'//div[contains(@class, "_pullDownItem")]'
         f'[.//span[normalize-space(.)="{rate}"]]'
     )
-    if not select_search_dropdown_item(
+    select_search_dropdown_item(
         c,
         rate_item_xpath,
         pulldown_xpath,
         f"rate={rate} game_id={game_id}",
-    ):
-        return 0
+    )
 
     c.click_it('//button[text()="レート決定"]')
     c.wait_random()
@@ -236,13 +245,12 @@ def seat_and_check_payout(c: Controller, game_id: int, is_bingo: bool=False, is_
         f'//div[contains(@class, "_pullDownItem")]'
         f'[.//span[normalize-space(.)="{credit:,}"]]'
     )
-    if not select_search_dropdown_item(
+    select_search_dropdown_item(
         c,
         credit_item_xpath,
         pulldown_xpath,
         f"credit={credit:,} game_id={game_id}",
-    ):
-        return 0
+    )
 
     c.driver.execute_cdp_cmd("Network.enable", {})
     c.driver.execute_cdp_cmd("Network.setCacheDisabled", {"cacheDisabled": True})
