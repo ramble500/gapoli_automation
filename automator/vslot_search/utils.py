@@ -10,6 +10,7 @@ from selenium.common.exceptions import TimeoutException
 
 from automator.login import Controller
 from automator.utils.influx import write_influx
+from automator.utils.recovery import raise_if_communication_error
 from automator.vslot.utils import shrink_window_if_clipped
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,7 @@ def finish_game(c: Controller, save_image: bool = True, from_dialog=False, is_bi
         raise Exception("精算後の画面遷移が完了しません（ボタン検出不可）")
         
 def take_store_all(c):
+    raise_if_communication_error(c)
     c.driver.switch_to.default_content()
     script = """
         return (function() {
@@ -119,6 +121,7 @@ def take_store_all(c):
 
 
 def take_store(c):
+    raise_if_communication_error(c)
     c.driver.switch_to.default_content()
     script = """
         return (function() {
@@ -263,9 +266,11 @@ def seat_and_check_payout(c: Controller, game_id: int, is_bingo: bool=False, is_
     payout = None
 
     try:
+        raise_if_communication_error(c)
         p_logs = c.driver.get_log("performance")
 
         for entry in p_logs:
+            raise_if_communication_error(c)
             msg = json.loads(entry["message"])["message"]
             # レスポンス受信イベントのみフィルター
             if (

@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from automator.utils.error_reporter import ErrorReporter
 from automator.utils.influx import init_influx
+from automator.utils.recovery import CommunicationErrorRecovered
 from automator.vslot.utils import (
     finish_game,
     focus_main_window,
@@ -192,6 +193,19 @@ def wait_for_game_medal_change(
 
 
 def game_loop(GAME_ID: int, processing_lock: threading.Lock):
+    game_name = MACHINE_LIST.get(GAME_ID, str(GAME_ID))
+    while True:
+        try:
+            return _game_loop(GAME_ID, processing_lock)
+        except CommunicationErrorRecovered:
+            logger.warning(
+                "[%s] 通信エラー復帰後、着席状態を再確認してオート設定をやり直します",
+                game_name,
+            )
+            time.sleep(2)
+
+
+def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
     global POSITION_STACK
     with ErrorReporter(c):
         IS_BINGO = GAME_ID in [20256, 20218]
@@ -541,6 +555,8 @@ def game_loop(GAME_ID: int, processing_lock: threading.Lock):
                                 game_name=GAME_NAME,
                             )
                             current_credit = game_store["medal"] if game_store else None
+                        except CommunicationErrorRecovered:
+                            raise
                         except Exception:
                             current_credit = None
 

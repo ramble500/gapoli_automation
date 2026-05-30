@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 
 from automator.utils.error_reporter import ErrorReporter
 from automator.utils.influx import init_influx
+from automator.utils.recovery import CommunicationErrorRecovered
 from automator.vslot_search.utils import (
     finish_game,
     focus_main_window,
@@ -104,6 +105,17 @@ except Exception as e:
 logger.warning(f'target list: {MACHINE_LIST}')
 
 c = Controller(headless=False, network_logging=True, no_mute=NO_MUTE)
+MAX_COMMUNICATION_RETRIES_PER_MACHINE = 5
+
+
+def prepare_search_retry(controller: Controller, game_id: int):
+    logger.warning("通信エラー復帰後、searchを機種ID=%sから再開", game_id)
+    controller.login("https://gapoli.net/game/")
+    controller.wait_loaded()
+    settled_games = initial_action(controller, interrupted_action="settle")
+    controller.wait_loaded()
+    if settled_games:
+        logger.warning("search再開前に中断ゲームを精算: %s", settled_games)
 
 with ErrorReporter(c):
     # 初回ログイン
@@ -147,18 +159,40 @@ with ErrorReporter(c):
         for game_id in machine_search_order:
             is_bingo = game_id in [20256, 20218]
             is_variety = game_id in [20205, 20204, 20226]
+            communication_retry_count = 0
+            needs_cleanup = False
 
-            c.login(f"https://gapoli.net/game/{game_id}")
-            c.wait_loaded()
+            while True:
+                try:
+                    if needs_cleanup:
+                        prepare_search_retry(c, game_id)
+                        needs_cleanup = False
 
-            c.driver.switch_to.default_content()
+                    c.login(f"https://gapoli.net/game/{game_id}")
+                    c.wait_loaded()
 
-            result_payout = seat_and_check_payout(
-                c,
-                game_id=game_id,
-                is_bingo=is_bingo,
-                is_variety=is_variety,
-            )
+                    c.driver.switch_to.default_content()
+
+                    result_payout = seat_and_check_payout(
+                        c,
+                        game_id=game_id,
+                        is_bingo=is_bingo,
+                        is_variety=is_variety,
+                    )
+                    break
+                except CommunicationErrorRecovered as exc:
+                    communication_retry_count += 1
+                    if communication_retry_count > MAX_COMMUNICATION_RETRIES_PER_MACHINE:
+                        raise RuntimeError(
+                            f"通信エラー復帰後も機種ID={game_id}の再開に失敗しました"
+                        ) from exc
+                    logger.warning(
+                        "通信エラーから復帰。機種ID=%sを再試行 (%s/%s)",
+                        game_id,
+                        communication_retry_count,
+                        MAX_COMMUNICATION_RETRIES_PER_MACHINE,
+                    )
+                    needs_cleanup = True
 
             # 好ペイアウト台を発見
             if result_payout >= ACCEPT_PAYOUT:

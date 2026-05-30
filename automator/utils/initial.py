@@ -3,6 +3,7 @@ import time
 from typing import List
 
 from automator.login import Controller
+from automator.utils.recovery import CommunicationErrorRecovered
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,8 @@ def initial_action(c: Controller, interrupted_action: str = "resume") -> List[st
             c.click_it('//div[contains(@class, "_oKButton")]', timeout=3)
             logger.info("ログボスキップ")
             time.sleep(0.5)
+    except CommunicationErrorRecovered:
+        raise
     except:
         pass
 
@@ -52,6 +55,8 @@ def initial_action(c: Controller, interrupted_action: str = "resume") -> List[st
             c.click_it('//div[contains(@class, "_oKButton")]', timeout=3)
             logger.info("ログボスキップ")
             time.sleep(0.5)
+    except CommunicationErrorRecovered:
+        raise
     except:
         pass
 
@@ -69,6 +74,8 @@ def initial_action(c: Controller, interrupted_action: str = "resume") -> List[st
             c.click_it('//div[contains(@class, "_oKButton")]', timeout=3)
             logger.info("ログボスキップ")
             time.sleep(0.5)
+    except CommunicationErrorRecovered:
+        raise
     except:
         pass
 

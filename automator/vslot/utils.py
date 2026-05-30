@@ -9,6 +9,10 @@ from typing import List
 
 from automator.login import Controller
 from automator.utils.influx import write_influx
+from automator.utils.recovery import (
+    CommunicationErrorRecovered,
+    raise_if_communication_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +75,8 @@ def finish_game(c: Controller, save_image: bool = True, from_dialog=False, is_bi
                 el = c.wait_it(
                     '//div/div/span[text()[contains(.,"精算確認")]]', timeout=2
                 )
+            except CommunicationErrorRecovered:
+                raise
             except:
                 el = None
                 # どこかでスタックしている可能性があるため、一度スペースボタンを押す (ビンゴ、バラエティを除く)
@@ -105,6 +111,8 @@ def finish_game(c: Controller, save_image: bool = True, from_dialog=False, is_bi
     def safe_click(xpath: str):
         try:
             c.click_it(xpath)
+        except CommunicationErrorRecovered:
+            raise
         except Exception:
             logger.warning(f"通常クリック失敗: {xpath}", exc_info=True)
             raise
@@ -158,6 +166,7 @@ def finish_game(c: Controller, save_image: bool = True, from_dialog=False, is_bi
         raise Exception("精算後の画面遷移が完了しません（前面ポップアップが消えない）")
 
 def take_store_all(c):
+    raise_if_communication_error(c)
     c.driver.switch_to.default_content()
     script = """
         return (function() {
@@ -188,6 +197,7 @@ def take_store_all(c):
 
 
 def take_store(c):
+    raise_if_communication_error(c)
     try:
         c.driver.switch_to.default_content()
         script = """
@@ -428,6 +438,8 @@ def seat(c: Controller, rate: int = 10, credit: int = 10000, accept_payout: int 
         time.sleep(1.0)
         try:
             c.click_it('//button[text()="プレイ"]')
+        except CommunicationErrorRecovered:
+            raise
         except Exception:
             logger.info("プレイボタンが他要素に遮られたため、少し待って再クリック")
             time.sleep(1.5)
@@ -477,9 +489,11 @@ def seat(c: Controller, rate: int = 10, credit: int = 10000, accept_payout: int 
 
         is_continue = False
         try:
+            raise_if_communication_error(c)
             p_logs = c.driver.get_log("performance")
 
             for entry in p_logs:
+                raise_if_communication_error(c)
                 msg = json.loads(entry["message"])["message"]
                 # レスポンス受信イベントのみフィルター
                 if (

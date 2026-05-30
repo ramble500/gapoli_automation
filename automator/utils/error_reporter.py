@@ -5,6 +5,7 @@ from types import TracebackType
 from venv import logger
 
 from automator.login import Controller
+from automator.utils.recovery import CommunicationErrorRecovered
 
 
 class ErrorReporter:
@@ -17,6 +18,8 @@ class ErrorReporter:
         return self
 
     def __exit__(self, ex_type, ex_value, trace: TracebackType):
+        if ex_type is not None and issubclass(ex_type, CommunicationErrorRecovered):
+            return False
         if trace is not None:
             log_path = f"./log/error_reports/{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}/"
             os.makedirs(log_path, exist_ok=True)

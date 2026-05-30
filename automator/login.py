@@ -22,6 +22,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from .utils.detect import get_click_point, get_similar_image
+from .utils.recovery import raise_if_communication_error
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,7 @@ class Controller:
         except Exception:
             logger.warning("failed to maximize browser window", exc_info=True)
         self.last_ss = None
+        self.communication_retry_count = 0
         self.ratio = float(self.driver.execute_script("return window.devicePixelRatio"))
 
     def login(self, url):
@@ -139,6 +141,7 @@ class Controller:
         next_log_at = 0
 
         while time.monotonic() < deadline:
+            raise_if_communication_error(self)
             found = False
             for el in self.driver.find_elements(By.XPATH, xpath):
                 found = True
@@ -197,12 +200,11 @@ class Controller:
         scroll_amount=240,
     ):
         driver = self.driver
-        WebDriverWait(driver, timeout).until(
-            EC.presence_of_element_located((By.XPATH, xpath))
-        )
+        self.wait_it(xpath, timeout=timeout)
 
         last_info = None
         for attempt in range(max_scrolls + 1):
+            raise_if_communication_error(self)
             for el in driver.find_elements(By.XPATH, xpath):
                 try:
                     width, height = self._get_element_size(el)
@@ -249,6 +251,7 @@ class Controller:
         )
 
     def scroll_wheel(self, origin=None, amount=240):
+        raise_if_communication_error(self)
         if origin is None:
             origin_el = self.driver.find_element(By.TAG_NAME, "body")
         elif isinstance(origin, str):
@@ -401,10 +404,7 @@ class Controller:
         )
 
     def scroll_into(self, xpath, timeout=10):
-        driver = self.driver
-        WebDriverWait(driver, timeout).until(
-            EC.presence_of_element_located((By.XPATH, xpath))
-        )
+        self.wait_it(xpath, timeout=timeout)
 
         ac = ActionChains(self.driver, duration=40)
         el = self.driver.find_element(By.XPATH, xpath)
@@ -412,30 +412,33 @@ class Controller:
         ac.perform()
 
     def wait_it(self, xpath, timeout=10):
-        driver = self.driver
-        WebDriverWait(driver, timeout).until(
-            EC.presence_of_element_located((By.XPATH, xpath))
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            raise_if_communication_error(self)
+            elements = self.driver.find_elements(By.XPATH, xpath)
+            if elements:
+                return elements[0]
+            time.sleep(0.2)
+        raise selenium.common.exceptions.TimeoutException(
+            f"target was not found before timeout: xpath={xpath}"
         )
-        return self.driver.find_element(By.XPATH, xpath)
 
     def get_element(self, xpath):
+        raise_if_communication_error(self)
         try:
             return self.driver.find_element(By.XPATH, xpath)
         except:
             return None
 
     def get_elements(self, xpath):
+        raise_if_communication_error(self)
         try:
             return self.driver.find_elements(By.XPATH, xpath)
         except:
             return None
 
     def input_text(self, xpath, text):
-        driver = self.driver
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.XPATH, xpath))
-        )
-        el = driver.find_element(By.XPATH, xpath)
+        el = self.wait_it(xpath, timeout=10)
         el.send_keys(text)
 
     def wait(self, sec):
@@ -445,12 +448,21 @@ class Controller:
         self.wait(sec * (random.random() * 0.6 + 0.7))
 
     def wait_loaded(self, timeout=30):
-        driver = self.driver
-        WebDriverWait(driver, timeout).until(
-            lambda d: d.execute_script("return document.readyState") == "complete"
-        )
-        WebDriverWait(driver, timeout).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            raise_if_communication_error(self)
+            try:
+                loaded = (
+                    self.driver.execute_script("return document.readyState")
+                    == "complete"
+                )
+                if loaded and self.driver.find_elements(By.CSS_SELECTOR, "body"):
+                    return
+            except selenium.common.exceptions.WebDriverException:
+                pass
+            time.sleep(0.2)
+        raise selenium.common.exceptions.TimeoutException(
+            "page did not finish loading before timeout"
         )
 
     def wait_forever(self):
@@ -583,6 +595,7 @@ class Controller:
         ratio: float = 1,
         context: bool = False,
     ):
+        raise_if_communication_error(self)
         if relative_from_xpath is not None:
             el = self.driver.find_element(By.XPATH, relative_from_xpath)
         else:
@@ -605,6 +618,7 @@ class Controller:
         ratio: float = 1,
         context: bool = False,
     ):
+        raise_if_communication_error(self)
         if relative_from_xpath is not None:
             el = self.driver.find_element(By.XPATH, relative_from_xpath)
         else:
@@ -629,6 +643,7 @@ class Controller:
         context: bool = False,
         pause=0.04,
     ):
+        raise_if_communication_error(self)
         if relative_from_xpath is not None:
             el = self.driver.find_element(By.XPATH, relative_from_xpath)
         else:
@@ -658,6 +673,8 @@ class Controller:
         next_log_at = 0
 
         while time.monotonic() < deadline:
+            if not getattr(self, "_recovering_communication_error", False):
+                raise_if_communication_error(self)
             max_attempts = 3
             for attempt in range(max_attempts):
                 self._scroll_element_point_into_view(el, pos)
@@ -1125,6 +1142,7 @@ class Controller:
         return get_similar_image(template_image, ss_image)
 
     def key_down(self, key: Keys | str, el_xpath: Optional[str] = None, times=1):
+        raise_if_communication_error(self)
         ac = ActionChains(self.driver, duration=40)
         if el_xpath is not None:
             el_xpath = self.get_element(el_xpath)
@@ -1136,6 +1154,7 @@ class Controller:
         ac.perform()
 
     def dragdrop(self, pos_start, pos_end_relative_on_window, relative_from_xpath: str = None):
+        raise_if_communication_error(self)
         ac = ActionChains(self.driver, duration=400)
         if relative_from_xpath is not None:
             el = self.driver.find_element(By.XPATH, relative_from_xpath)
@@ -1155,6 +1174,7 @@ class Controller:
         ac.perform()
 
     def set_css_attribute_all(self, xpath, attrib, value):
+        raise_if_communication_error(self)
         try:
             els = self.driver.find_elements(By.XPATH, xpath)
             for el in els:
