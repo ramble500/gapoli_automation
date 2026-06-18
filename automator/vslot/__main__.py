@@ -444,6 +444,7 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                     ]
                     button_start_candidates = [
                         (300/b_width, 605/b_height),
+                        (300/b_width, 710/b_height),
                     ]
 
                 elif GAME_ID == 20226:
@@ -458,6 +459,7 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                     ]
                     button_start_candidates = [
                         (300/b_width, 710/b_height),
+                        (300/b_width, 605/b_height),
                     ]
 
                 # 初期設定を行う間はロック
@@ -514,6 +516,12 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                             break
 
                         focus_main_window(c, game_type=GAME_TYPE)
+                        logger.info(
+                            f"[{GAME_NAME}] バラエティ手動クリック "
+                            f"spec={VARIETY_SPEC}:{button_spec[VARIETY_SPEC - 1]} "
+                            f"bet={VARIETY_BET}:{button_bet[VARIETY_BET - 1]} "
+                            f"start候補={pending_start_label}:{pending_start_button}"
+                        )
                         click_canvas_game_pos(c, button_spec[VARIETY_SPEC - 1])
                         time.sleep(0.25)
                         click_canvas_game_pos(c, button_bet[VARIETY_BET - 1])
