@@ -313,7 +313,7 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
 
                         c.driver.switch_to.default_content()
 
-                    logger.warning(f"[{GAME_NAME}] オート開始設定を実行 ({auto_attempt}/2).")
+                    logger.warning(f"[{GAME_NAME}] オート開始設定を実行 ({auto_attempt}/4).")
                     auto_started = wait_for_game_medal_change(
                         processing_lock,
                         5,
@@ -328,24 +328,7 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                     logger.warning(f"[{GAME_NAME}] オート開始後のcredit変化なし。再設定します.")
 
                 if not auto_started:
-                    logger.warning(f"[{GAME_NAME}] オート開始確認失敗。スペース補助ループで監視継続.")
-                
-                # スペースキーを押す間隔の設定
-                # 0.65 くじらさん
-                # 0.75 きつねさん、西遊記、クインパ、ヒーローズ
-                # 0.85 スピワイ、カスイチ
-                # ほかは未調査
-
-                if GAME_ID == 20238:
-                    space_interval = 0.65
-                elif GAME_ID in (20224, 20231, 20220, 20215):
-                    space_interval = 0.75
-                elif GAME_ID in (20246, 20254):
-                    space_interval = 0.85
-                elif GAME_ID in (20280, -2):
-                    space_interval = 0.975
-                else:  # ad hoc
-                    space_interval = 0.85
+                    raise RuntimeError(f"[{GAME_NAME}] オート開始確認失敗。手動補助には切り替えません。")
 
                 for i in range(100000):
                     with processing_lock:
@@ -404,12 +387,7 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                             finish_game(c, from_dialog=True)
                         break
 
-                    time.sleep(space_interval)
-    
-                    with processing_lock:
-                        focus_main_window(c, game_type=GAME_TYPE)
-                        c.key_down(" ", "//canvas")
-                        c.driver.switch_to.default_content()
+                    time.sleep(5)
 
 
             # 手動開始 (バラエティ)
