@@ -328,7 +328,21 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                     logger.warning(f"[{GAME_NAME}] オート開始後のcredit変化なし。再設定します.")
 
                 if not auto_started:
-                    raise RuntimeError(f"[{GAME_NAME}] オート開始確認失敗。手動補助には切り替えません。")
+                    logger.warning(f"[{GAME_NAME}] オート開始確認失敗。スペース補助ループで監視継続.")
+
+                # スペースキーを押す間隔の設定
+                # 0.65 くじらさん
+                # ほかは未調査
+                if GAME_ID == 20238:
+                    space_interval = 0.65
+                elif GAME_ID in (20224, 20231, 20220, 20215):
+                    space_interval = 0.75
+                elif GAME_ID in (20246, 20254):
+                    space_interval = 0.85
+                elif GAME_ID in (20280, -2):
+                    space_interval = 0.975
+                else:  # ad hoc
+                    space_interval = 0.85
 
                 for i in range(100000):
                     with processing_lock:
@@ -387,7 +401,12 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                             finish_game(c, from_dialog=True)
                         break
 
-                    time.sleep(5)
+                    time.sleep(space_interval)
+
+                    with processing_lock:
+                        focus_main_window(c, game_type=GAME_TYPE)
+                        c.key_down(" ", "//canvas")
+                        c.driver.switch_to.default_content()
 
 
             # 手動開始 (バラエティ)
@@ -631,9 +650,9 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                     focus_main_window(c, game_type=GAME_TYPE)
 
                     # スピード3に設定
-                    c.click_relative_pos(button_leftpanel, "//canvas")
+                    click_canvas_game_pos(c, button_leftpanel)
                     time.sleep(0.5)
-                    c.click_relative_pos(button_speed3, "//canvas")
+                    click_canvas_game_pos(c, button_speed3)
                     time.sleep(0.5)
                     logger.info(f'[{GAME_NAME}] スピード3に設定')
 
@@ -647,11 +666,11 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                     with processing_lock:
                         bring_window_to_front(c, GAME_TYPE)
                         focus_main_window(c, game_type=GAME_TYPE)
-                        c.click_relative_pos(button_rightpanel, "//canvas")
+                        click_canvas_game_pos(c, button_rightpanel)
                         time.sleep(0.5)
-                        c.click_relative_pos(button_automax, "//canvas")
+                        click_canvas_game_pos(c, button_automax)
                         time.sleep(0.5)
-                        c.click_relative_pos(button_begin_auto, "//canvas")
+                        click_canvas_game_pos(c, button_begin_auto)
                         logger.warning(f'[{GAME_NAME}] オート開始 (ビンゴ)')
                     
                         # ボーナス当選検知用
@@ -679,9 +698,9 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                                 focus_main_window(c, game_type=GAME_TYPE)
 
                                 # 現在のゲームを終了 (エクストラボール終了)
-                                c.click_relative_pos(button_extraball_end, "//canvas")
+                                click_canvas_game_pos(c, button_extraball_end)
                                 time.sleep(0.8)
-                                c.click_relative_pos(button_extraball_end_confirm, "//canvas")
+                                click_canvas_game_pos(c, button_extraball_end_confirm)
                                 time.sleep(10)
 
                                 save_play_data_screenshot(GAME_NAME, GAME_TYPE)
@@ -748,14 +767,14 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                                     focus_main_window(c, game_type=GAME_TYPE)
 
                                     # ボーナス画面に入る (10球未満で突入した場合)
-                                    c.click_relative_pos(button_extraball_end, "//canvas")
+                                    click_canvas_game_pos(c, button_extraball_end)
                                     time.sleep(0.8)
-                                    c.click_relative_pos(button_extraball_end_confirm, "//canvas")
+                                    click_canvas_game_pos(c, button_extraball_end_confirm)
                                     time.sleep(13)
 
                                     # ボーナス開始
                                     logger.info(f'[{GAME_NAME}] ボーナススタート選択')
-                                    c.click_relative_pos(button_begin_bonus, "//canvas")
+                                    click_canvas_game_pos(c, button_begin_bonus)
                                     time.sleep(3)
 
                                     # ガチャの選択
@@ -763,16 +782,16 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                                     focus_main_window(c, game_type=GAME_TYPE)
                                     if is_first_bonus:
                                         logger.info(f'[{GAME_NAME}] ガチャスペック変更')
-                                        c.click_relative_pos(button_swap_spec_right, "//canvas")
+                                        click_canvas_game_pos(c, button_swap_spec_right)
                                         time.sleep(1)
                                         is_first_bonus = False
                                     logger.info(f'[{GAME_NAME}] ガチャ回転')
-                                    c.click_relative_pos(button_draw_capsule_all, "//canvas")
+                                    click_canvas_game_pos(c, button_draw_capsule_all)
                                     time.sleep(5)
 
                                     # カプセルの開封
                                     logger.info(f'[{GAME_NAME}] カプセル開封')
-                                    c.click_relative_pos(button_open_capsule_all, "//canvas")
+                                    click_canvas_game_pos(c, button_open_capsule_all)
                                     time.sleep(5)
 
                                 # クレジットが変動する (=ビンゴラッシュが終わる) までボタンを定期的に押す
@@ -793,15 +812,15 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                                         rush_wait_count += 1
                                         bring_window_to_front(c, GAME_TYPE)
                                         focus_main_window(c, game_type=GAME_TYPE)
-                                        c.click_relative_pos(button_begin_rush, "//canvas")
+                                        click_canvas_game_pos(c, button_begin_rush)
 
                                         # 複数ボーナスをもらった時対策で、ボーナス開始、ガチャ回転、カプセル開封 ボタン位置を定期的に押す
                                         if rush_wait_count % 3 == 0:  
-                                            c.click_relative_pos(button_begin_bonus, "//canvas")
+                                            click_canvas_game_pos(c, button_begin_bonus)
                                         if rush_wait_count % 3 == 1:
-                                            c.click_relative_pos(button_draw_capsule_all, "//canvas")
+                                            click_canvas_game_pos(c, button_draw_capsule_all)
                                         elif rush_wait_count % 3 == 2:
-                                            c.click_relative_pos(button_open_capsule_all, "//canvas")
+                                            click_canvas_game_pos(c, button_open_capsule_all)
 
                                     time.sleep(5)
 

@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import random
+import re
 import socket
 import sys
 import time
@@ -28,12 +29,39 @@ from .utils.recovery import raise_if_communication_error
 
 logger = logging.getLogger(__name__)
 
-DISPLAY_PROFILE_VERSION = 1
-DEFAULT_DISPLAY_PROFILE_PATH = Path("./log/runtime/display_profile.json")
+DISPLAY_PROFILE_VERSION = 2
+DEFAULT_DISPLAY_PROFILE_DIR = Path("./log/runtime/display_profiles")
+
+
+def _current_computer_name() -> str:
+    return os.environ.get("COMPUTERNAME") or socket.gethostname() or "unknown"
+
+
+def _safe_profile_name(value: str) -> str:
+    value = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
+    return value or "unknown"
+
+
+def _current_desktop_size() -> dict | None:
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        return {
+            "width": int(user32.GetSystemMetrics(0)),
+            "height": int(user32.GetSystemMetrics(1)),
+        }
+    except Exception:
+        return None
 
 
 def _display_profile_path() -> Path:
-    return Path(os.environ.get("GAPOLI_DISPLAY_PROFILE_PATH", DEFAULT_DISPLAY_PROFILE_PATH))
+    custom_path = os.environ.get("GAPOLI_DISPLAY_PROFILE_PATH")
+    if custom_path:
+        return Path(custom_path)
+    return DEFAULT_DISPLAY_PROFILE_DIR / f"{_safe_profile_name(_current_computer_name())}.json"
 
 
 def _load_display_profile() -> dict | None:
@@ -57,6 +85,35 @@ def _load_display_profile() -> dict | None:
     if profile.get("version") != DISPLAY_PROFILE_VERSION:
         logger.info("display profile version mismatch; current run will capture a new profile")
         return None
+
+    profile_computer = profile.get("computer")
+    if profile_computer and profile_computer != _current_computer_name():
+        logger.info(
+            "display profile computer mismatch; current run will capture a new profile: path=%s profile=%s current=%s",
+            path,
+            profile_computer,
+            _current_computer_name(),
+        )
+        return None
+
+    current_desktop = _current_desktop_size()
+    profile_desktop = profile.get("desktop") or {}
+    profile_screen = profile_desktop or profile.get("screen", {})
+    if current_desktop and profile_screen.get("width") and profile_screen.get("height"):
+        if (
+            int(profile_screen["width"]) != current_desktop["width"]
+            or int(profile_screen["height"]) != current_desktop["height"]
+        ):
+            logger.info(
+                "display profile screen mismatch; current run will capture a new profile: path=%s profile=%s current=%s",
+                path,
+                {
+                    "width": profile_screen["width"],
+                    "height": profile_screen["height"],
+                },
+                current_desktop,
+            )
+            return None
 
     window = profile.get("window", {})
     width = int(window.get("width", 0) or 0)
@@ -128,8 +185,9 @@ def _save_display_profile(driver) -> dict:
     window = driver.get_window_rect()
     profile = {
         "version": DISPLAY_PROFILE_VERSION,
-        "computer": os.environ.get("COMPUTERNAME") or socket.gethostname(),
+        "computer": _current_computer_name(),
         "capturedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "desktop": _current_desktop_size(),
         "window": {
             "x": int(window.get("x", 0) or 0),
             "y": int(window.get("y", 0) or 0),

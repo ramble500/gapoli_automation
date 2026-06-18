@@ -344,6 +344,7 @@ def click_canvas_game_pos(
     canvas_xpath: str = "//canvas",
     base_width: int = 560,
     base_height: int = 960,
+    aspect_tolerance: float = 0.04,
 ):
     canvas = c.get_element(canvas_xpath)
     if canvas is None:
@@ -357,23 +358,33 @@ def click_canvas_game_pos(
 
     base_ratio = base_width / base_height
     canvas_ratio = width / height
-    if canvas_ratio > base_ratio:
+    ratio_delta = abs(canvas_ratio - base_ratio) / base_ratio
+    if ratio_delta <= aspect_tolerance:
+        active_width = width
+        active_height = height
+        offset_x = 0
+        offset_y = 0
+        mode = "full"
+    elif canvas_ratio > base_ratio:
         active_height = height
         active_width = height * base_ratio
         offset_x = (width - active_width) / 2
         offset_y = 0
+        mode = "contain-x"
     else:
         active_width = width
         active_height = width / base_ratio
         offset_x = 0
         offset_y = (height - active_height) / 2
+        mode = "contain-y"
 
     pos = (
         offset_x + relative_pos[0] * active_width,
         offset_y + relative_pos[1] * active_height,
     )
     logger.debug(
-        "canvas game click: relative=%s pos=%s canvas=%sx%s active=%sx%s offset=%sx%s",
+        "canvas game click: mode=%s relative=%s pos=%s canvas=%sx%s active=%sx%s offset=%sx%s ratio=%s base_ratio=%s",
+        mode,
         relative_pos,
         pos,
         width,
@@ -382,6 +393,8 @@ def click_canvas_game_pos(
         active_height,
         offset_x,
         offset_y,
+        canvas_ratio,
+        base_ratio,
     )
     c._click_element_point_with_mouse(canvas, pos)
 
@@ -392,6 +405,24 @@ def click_auto_progress_button(
     fallback_pos: tuple[float, float] = (525 / 560, 910 / 960),
     candidate_index: int = 0,
 ):
+    c.driver.switch_to.default_content()
+    auto_button_xpath = (
+        f'//div[contains(@class, "{game_type}")]'
+        '//div[contains(@class, "autoButtonWrapper") '
+        'and not(contains(@class, "disabled"))]'
+    )
+    if c.get_element(auto_button_xpath) is not None:
+        try:
+            logger.info("click autoButtonWrapper")
+            c.click_it(auto_button_xpath, timeout=2)
+            time.sleep(0.2)
+            focus_main_window(c, game_type=game_type)
+            return
+        except CommunicationErrorRecovered:
+            raise
+        except Exception:
+            logger.debug("autoButtonWrapper click failed; fallback to canvas", exc_info=True)
+
     candidate_seeds = [
         fallback_pos,
         (525 / 560, 925 / 960),
@@ -422,11 +453,6 @@ def click_auto_progress_button(
         )
 
     c.driver.switch_to.default_content()
-    auto_button_xpath = (
-        f'//div[contains(@class, "{game_type}")]'
-        '//div[contains(@class, "autoButtonWrapper") '
-        'and not(contains(@class, "disabled"))]'
-    )
     logger.info("click autoButtonWrapper fallback")
     c.click_it(auto_button_xpath, timeout=5)
     time.sleep(0.2)
@@ -705,18 +731,18 @@ def seat(c: Controller, rate: int = 10, credit: int = 10000, accept_payout: int 
                                 button_extraball_end_confirm = (160/b_width, 650/b_height)
 
                                 logger.info('スピード3に設定')
-                                c.click_relative_pos(button_leftpanel, "//canvas")
+                                click_canvas_game_pos(c, button_leftpanel)
                                 time.sleep(0.5)
-                                c.click_relative_pos(button_speed3, "//canvas")
+                                click_canvas_game_pos(c, button_speed3)
                                 time.sleep(0.5)
 
                                 logger.info('1回転まわす')
-                                c.click_relative_pos(button_begin, "//canvas")
+                                click_canvas_game_pos(c, button_begin)
                                 time.sleep(5.5)
 
-                                c.click_relative_pos(button_extraball_end, "//canvas")
+                                click_canvas_game_pos(c, button_extraball_end)
                                 time.sleep(0.8)
-                                c.click_relative_pos(button_extraball_end_confirm, "//canvas")
+                                click_canvas_game_pos(c, button_extraball_end_confirm)
                                 time.sleep(1)
 
                             elif is_variety:
