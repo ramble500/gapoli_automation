@@ -205,6 +205,54 @@ def get_search_exchange_settings(game_id: int, is_variety: bool) -> tuple[int, i
     return 1, 1000
 
 
+def play_variety_once_for_search(c: Controller, game_id: int, game_type: str) -> None:
+    b_width = 560
+    b_height = 960
+    settings = {
+        20205: {
+            "name": "Hokuto",
+            "reel_auto": (525 / b_width, 925 / b_height),
+            "spec": (105 / b_width, 255 / b_height),
+            "bet": (130 / b_width, 640 / b_height),
+            "start": (300 / b_width, 710 / b_height),
+        },
+        20204: {
+            "name": "Juoh",
+            "reel_auto": None,
+            "spec": (300 / b_width, 320 / b_height),
+            "bet": (185 / b_width, 540 / b_height),
+            "start": (300 / b_width, 605 / b_height),
+        },
+        20226: {
+            "name": "Oshobu",
+            "reel_auto": None,
+            "spec": (110 / b_width, 280 / b_height),
+            "bet": (140 / b_width, 660 / b_height),
+            "start": (300 / b_width, 710 / b_height),
+        },
+    }
+    setting = settings.get(game_id)
+    if setting is None:
+        logger.warning("search variety spin skipped; unsupported game_id=%s", game_id)
+        return
+
+    focus_main_window(c, game_type=game_type)
+
+    if setting["reel_auto"] is not None:
+        logger.info("search variety %s: enable reel auto", setting["name"])
+        c.click_relative_pos(setting["reel_auto"], "//canvas")
+        time.sleep(0.5)
+
+    logger.info("search variety %s: select spec/bet and spin once", setting["name"])
+    c.click_relative_pos(setting["spec"], "//canvas")
+    time.sleep(0.25)
+    c.click_relative_pos(setting["bet"], "//canvas")
+    time.sleep(0.25)
+    c.click_relative_pos(setting["start"], "//canvas")
+    time.sleep(20)
+    c.driver.switch_to.default_content()
+
+
 def seat_and_check_payout(c: Controller, game_id: int, is_bingo: bool=False, is_variety: bool=False) -> int:
     game_type = 'pink' if is_variety else 'green'
     rate, credit = get_search_exchange_settings(game_id, is_variety)
@@ -294,9 +342,13 @@ def seat_and_check_payout(c: Controller, game_id: int, is_bingo: bool=False, is_
                 if "buy_medal" in msg["params"]["response"]["url"]:
                     payout = int(json.loads(body["body"])["data"]["payout"])
                     logger.info(f"{payout=}")
-                    logger.info("search payout checked from buy_medal; no spin/auto")
-                    c.driver.switch_to.default_content()
-                    c.wait_random()
+                    if is_variety:
+                        logger.info("search payout checked from buy_medal; spin variety once before settlement")
+                        play_variety_once_for_search(c, game_id, game_type)
+                    else:
+                        logger.info("search payout checked from buy_medal; no spin/auto")
+                        c.driver.switch_to.default_content()
+                        c.wait_random()
 
                     # 精算
                     finish_game(c, save_image=False, is_bingo=is_bingo, is_variety=is_variety, game_type=game_type)
