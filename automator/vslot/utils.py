@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from typing import List
 
+from selenium.webdriver.common.keys import Keys
+
 from automator.login import Controller
 from automator.utils.influx import write_influx
 from automator.utils.recovery import (
@@ -494,6 +496,39 @@ def bring_window_to_front_2(c: Controller, game_type: str='green'):
     time.sleep(0.5)
 
 
+def reset_search_page(c: Controller):
+    c.driver.switch_to.default_content()
+    if "search" not in c.driver.current_url:
+        c.login("https://gapoli.net/search/")
+        c.wait_loaded()
+        time.sleep(1.5)
+
+
+def click_search_close_if_present(c: Controller, xpath: str, label: str) -> bool:
+    c.driver.switch_to.default_content()
+    if c.get_element(xpath) is None:
+        return True
+
+    try:
+        c.click_it(xpath, timeout=3)
+        time.sleep(0.8)
+        return True
+    except CommunicationErrorRecovered:
+        raise
+    except Exception:
+        logger.warning("failed to close search overlay: %s", label, exc_info=True)
+        return False
+
+
+def input_game_search_text(c: Controller, game_name: str):
+    search_input_xpath = '//input[contains(@class, "gameSearchInput")]'
+    el = c.wait_it(search_input_xpath, timeout=20)
+    el.click()
+    el.send_keys(Keys.CONTROL, "a")
+    el.send_keys(Keys.BACKSPACE)
+    el.send_keys(game_name)
+
+
 def seat(c: Controller, rate: int = 10, credit: int = 10000, accept_payout: int = 6, is_bingo: bool = False, \
      is_variety: bool = False, game_type: str='green', game_name: str='', existing_window: bool = False):
     # ほかのウインドウを最小化 (あれば)
@@ -519,22 +554,45 @@ def seat(c: Controller, rate: int = 10, credit: int = 10000, accept_payout: int 
 
         # 検索バーからたどる
         # 0. 検索用のウインドウが開いていない場合は、開き直す
-        if not 'search' in c.driver.current_url and not 'game' in c.driver.current_url:
-            c.click_it('//button[contains(@class, "navItem")][3]')
-            time.sleep(4)
+        reset_search_page(c)
         # 1. ゲーム詳細ウインドウが開いている場合は、閉じる (検索画面に移る)
-        if c.get_element('//div[contains(@class, "descImageButton")]/..//div[contains(@class, "closeIconOuter")]'):
-            c.click_it('//div[contains(@class, "descImageButton")]/..//div[contains(@class, "closeIconOuter")]')
-            time.sleep(1)
+        if not click_search_close_if_present(
+            c,
+            '//div[contains(@class, "descImageButton")]/..//div[contains(@class, "closeIconOuter")]',
+            "game detail",
+        ):
+            c.login("https://gapoli.net/search/")
+            c.wait_loaded()
+            time.sleep(1.5)
+            continue
         # 2. 検索バーに何か文字が入っている (×ボタンがある) 場合は、消す
-        if c.get_element('//div[contains(@class, "closeSearchIcon")]'):
-            c.click_it('//div[contains(@class, "closeSearchIcon")]')
-            time.sleep(1)
+        if not click_search_close_if_present(
+            c,
+            '//div[contains(@class, "closeSearchIcon")]',
+            "search text",
+        ):
+            c.login("https://gapoli.net/search/")
+            c.wait_loaded()
+            time.sleep(1.5)
+            continue
         # 3. 検索バーにゲーム名を入力 → 反映されるまでしばらく待つ
-        c.input_text('//input[contains(@class, "gameSearchInput")]', game_name)
+        input_game_search_text(c, game_name)
         time.sleep(1.5)
         # 4. 一番上のエントリをクリック
-        c.click_it('//div[contains(@class, "gameItemContainer")][1]')
+        try:
+            c.click_visible_item(
+                '(//div[contains(@class, "gameItemContainer")])[1]//div[contains(@class, "rowWrapper")]',
+                timeout=10,
+                max_scrolls=2,
+            )
+        except CommunicationErrorRecovered:
+            raise
+        except Exception:
+            logger.warning("failed to click search result; reload search and retry", exc_info=True)
+            c.login("https://gapoli.net/search/")
+            c.wait_loaded()
+            time.sleep(1.5)
+            continue
         c.wait_loaded()
 
         time.sleep(1.0)
