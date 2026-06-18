@@ -392,12 +392,16 @@ def click_auto_progress_button(
     fallback_pos: tuple[float, float] = (525 / 560, 910 / 960),
     candidate_index: int = 0,
 ):
-    candidates = [
+    candidate_seeds = [
+        fallback_pos,
+        (525 / 560, 925 / 960),
+        (505 / 560, 925 / 960),
+        (525 / 560, 910 / 960),
+        (505 / 560, 910 / 960),
         (525 / 560, 895 / 960),
         (505 / 560, 895 / 960),
-        (525 / 560, 910 / 960),
-        fallback_pos,
     ]
+    candidates = list(dict.fromkeys(candidate_seeds))
     candidate = candidates[candidate_index % len(candidates)]
 
     focus_main_window(c, game_type=game_type)
