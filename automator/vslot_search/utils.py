@@ -11,7 +11,11 @@ from selenium.common.exceptions import TimeoutException
 from automator.login import Controller
 from automator.utils.influx import write_influx
 from automator.utils.recovery import raise_if_communication_error
-from automator.vslot.utils import shrink_window_if_clipped
+from automator.vslot.utils import (
+    click_auto_progress_button,
+    click_canvas_game_pos,
+    shrink_window_if_clipped,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -154,30 +158,53 @@ def take_store(c):
 CACHED_GAME_INFO = None
 
 
-def take_game_store(c):
+def take_game_store(
+    c,
+    game_category: int = 5,
+    game_id: int | None = None,
+    game_name: str | None = None,
+):
     global CACHED_GAME_INFO
 
     if CACHED_GAME_INFO is None:
         CACHED_GAME_INFO = take_store_all(c)["entities"]["game"]
 
     stores = take_store(c)
-    for item in stores.values():
-        if item["gameCategory"] == 5:
-            html_store = item["html"]
-            selectGameKeyId = item["selectGameKeyId"]
-            official_name = CACHED_GAME_INFO[str(selectGameKeyId)]["official_name"]
+    if not stores:
+        return None
 
-            logger.debug(f"{html_store}")
-            fields = {
-                "medal": html_store["medal"] // html_store["selectedRate"],
-                "game_name": official_name,
-                "total_coin": item["fsCoin"] + html_store["medal"],
-            }
-            write_influx(
-                f"videoslot",
-                fields,
-            )
-            return fields
+    for item in stores.values():
+        if item["gameCategory"] != game_category:
+            continue
+
+        html_store = item["html"]
+        selectGameKeyId = item["selectGameKeyId"]
+        official_name = CACHED_GAME_INFO[str(selectGameKeyId)]["official_name"]
+        if game_id is not None or game_name is not None:
+            matches_id = game_id is not None and int(selectGameKeyId) == int(game_id)
+            matches_name = game_name is not None and official_name == game_name
+            if not (matches_id or matches_name):
+                continue
+
+        if "medal" not in html_store:
+            logger.debug("game store has no medal: %s", html_store)
+            continue
+
+        selected_rate = html_store.get("selectedRate") or 1
+        logger.debug(f"{html_store}")
+        fields = {
+            "medal": html_store["medal"] // selected_rate,
+            "game_name": official_name,
+            "game_category": game_category,
+            "total_coin": item["fsCoin"] + html_store["medal"],
+        }
+        write_influx(
+            f"videoslot",
+            fields,
+        )
+        return fields
+
+    return None
 
 
 def select_search_dropdown_item(
@@ -203,6 +230,41 @@ def get_search_exchange_settings(game_id: int, is_variety: bool) -> tuple[int, i
     if is_variety:
         return 10, 10000
     return 1, 1000
+
+
+def read_search_game_medal(
+    c: Controller,
+    game_category: int,
+    game_id: int,
+) -> int | None:
+    game_store = take_game_store(c, game_category=game_category, game_id=game_id)
+    return game_store["medal"] if game_store else None
+
+
+def wait_for_search_game_medal_change(
+    c: Controller,
+    game_category: int,
+    game_id: int,
+    before_medal: int | None,
+    timeout: float = 12.0,
+) -> bool:
+    if before_medal is None:
+        return False
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(1.5)
+        current_medal = read_search_game_medal(c, game_category, game_id)
+        if current_medal is not None and current_medal != before_medal:
+            logger.info(
+                "search game credit changed: game_id=%s %s -> %s",
+                game_id,
+                before_medal,
+                current_medal,
+            )
+            return True
+
+    return False
 
 
 def play_variety_once_for_search(c: Controller, game_id: int, game_type: str) -> None:
@@ -236,21 +298,82 @@ def play_variety_once_for_search(c: Controller, game_id: int, game_type: str) ->
         logger.warning("search variety spin skipped; unsupported game_id=%s", game_id)
         return
 
+    c.driver.switch_to.default_content()
+    shrink_window_if_clipped(c, game_type=game_type)
+    before_medal = read_search_game_medal(c, game_category=2, game_id=game_id)
+    logger.info(
+        "search variety %s: before credit=%s",
+        setting["name"],
+        before_medal,
+    )
+
     focus_main_window(c, game_type=game_type)
 
     if setting["reel_auto"] is not None:
         logger.info("search variety %s: enable reel auto", setting["name"])
-        c.click_relative_pos(setting["reel_auto"], "//canvas")
+        click_auto_progress_button(
+            c,
+            game_type=game_type,
+            fallback_pos=setting["reel_auto"],
+        )
         time.sleep(0.5)
 
-    logger.info("search variety %s: select spec/bet and spin once", setting["name"])
-    c.click_relative_pos(setting["spec"], "//canvas")
-    time.sleep(0.25)
-    c.click_relative_pos(setting["bet"], "//canvas")
-    time.sleep(0.25)
-    c.click_relative_pos(setting["start"], "//canvas")
-    time.sleep(20)
-    c.driver.switch_to.default_content()
+    if before_medal is None:
+        logger.warning(
+            "search variety %s: credit unavailable; click start once without retry",
+            setting["name"],
+        )
+        focus_main_window(c, game_type=game_type)
+        click_canvas_game_pos(c, setting["spec"])
+        time.sleep(0.25)
+        click_canvas_game_pos(c, setting["bet"])
+        time.sleep(0.25)
+        click_canvas_game_pos(c, setting["start"])
+        time.sleep(20)
+        c.driver.switch_to.default_content()
+        return
+
+    for attempt in range(1, 5):
+        logger.info(
+            "search variety %s: select spec/bet and spin once attempt=%s",
+            setting["name"],
+            attempt,
+        )
+        focus_main_window(c, game_type=game_type)
+        click_canvas_game_pos(c, setting["spec"])
+        time.sleep(0.25)
+        click_canvas_game_pos(c, setting["bet"])
+        time.sleep(0.25)
+        click_canvas_game_pos(c, setting["start"])
+        time.sleep(0.5)
+        c.driver.switch_to.default_content()
+
+        if wait_for_search_game_medal_change(
+            c,
+            game_category=2,
+            game_id=game_id,
+            before_medal=before_medal,
+            timeout=12.0,
+        ):
+            time.sleep(8)
+            return
+
+        current_medal = read_search_game_medal(
+            c,
+            game_category=2,
+            game_id=game_id,
+        )
+        logger.warning(
+            "search variety %s: spin did not start attempt=%s before=%s current=%s",
+            setting["name"],
+            attempt,
+            before_medal,
+            current_medal,
+        )
+
+    raise RuntimeError(
+        f"search variety spin did not start: game_id={game_id} name={setting['name']}"
+    )
 
 
 def seat_and_check_payout(c: Controller, game_id: int, is_bingo: bool=False, is_variety: bool=False) -> int:

@@ -22,6 +22,8 @@ from automator.vslot.utils import (
     start_auto_9999,
     move_window_to_right,
     bring_window_to_front,
+    click_auto_progress_button,
+    click_canvas_game_pos,
 )
 
 load_dotenv(verbose=True)
@@ -163,6 +165,24 @@ def read_game_medal(
     return game_store["medal"] if game_store else None
 
 
+def save_play_data_screenshot(game_name: str, game_type: str) -> str:
+    result_path = f"./log/vs_result_ss/vs_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.png"
+    Path(result_path).parent.mkdir(parents=True, exist_ok=True)
+    focus_main_window(c, game_type=game_type)
+    c.wait_random()
+    try:
+        image = c.take_image_from_canvas("//canvas")
+    except CommunicationErrorRecovered:
+        raise
+    except Exception:
+        logger.debug("[%s] canvas capture failed; falling back to screenshot crop", game_name, exc_info=True)
+        image = c.take_photo_of("//canvas")
+    c.save_ss(result_path, image)
+    logger.info("[%s] play data screenshot saved: %s", game_name, result_path)
+    c.driver.switch_to.default_content()
+    return result_path
+
+
 def wait_for_game_medal_change(
     processing_lock: threading.Lock,
     game_category: int,
@@ -278,7 +298,7 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
             if not IS_BINGO and not IS_VARIETY:
 
                 auto_started = False
-                for auto_attempt in range(1, 3):
+                for auto_attempt in range(1, 5):
                     # オート開始処理を行う間はロック
                     with processing_lock:
                         before_auto_medal = read_game_medal(5, GAME_ID, GAME_NAME)
@@ -288,6 +308,7 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                             game_id=GAME_ID,
                             game_type=GAME_TYPE,
                             no_fast=NO_FAST,
+                            auto_button_attempt=auto_attempt - 1,
                         )
 
                         c.driver.switch_to.default_content()
@@ -355,10 +376,7 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                                 focus_main_window(c, game_type=GAME_TYPE)
 
                                 c.click_relative_pos((0.05, 0.95), "//canvas")
-                                c.wait_random()
-                                result_path = f"./log/vs_result_ss/vs_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.png"
-                                Path(result_path).parent.mkdir(parents=True, exist_ok=True)
-                                c.save_ss(result_path, c.take_photo_of("//canvas"))
+                                save_play_data_screenshot(GAME_NAME, GAME_TYPE)
 
                                 finish_game(c, game_type=GAME_TYPE)
                             break
@@ -382,6 +400,7 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                                 '//span[text()[contains(., "精算します")]]/../..//button[text()="精算"]'
                             )
                             c.wait_random()
+                            save_play_data_screenshot(GAME_NAME, GAME_TYPE)
                             finish_game(c, from_dialog=True)
                         break
 
@@ -455,7 +474,11 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
 
                     if button_reel_auto is not None:
                         logger.info(f'[{GAME_NAME}] リール停止オート有効化')
-                        c.click_relative_pos(button_reel_auto, "//canvas")
+                        click_auto_progress_button(
+                            c,
+                            game_type=GAME_TYPE,
+                            fallback_pos=button_reel_auto,
+                        )
                         time.sleep(0.5)
 
                     logger.info(
@@ -491,11 +514,11 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                             break
 
                         focus_main_window(c, game_type=GAME_TYPE)
-                        c.click_relative_pos(button_spec[VARIETY_SPEC - 1], "//canvas")
+                        click_canvas_game_pos(c, button_spec[VARIETY_SPEC - 1])
                         time.sleep(0.25)
-                        c.click_relative_pos(button_bet[VARIETY_BET - 1], "//canvas")
+                        click_canvas_game_pos(c, button_bet[VARIETY_BET - 1])
                         time.sleep(0.25)
-                        c.click_relative_pos(pending_start_button, "//canvas")
+                        click_canvas_game_pos(c, pending_start_button)
                         time.sleep(0.5)
 
                     # クレジット切れダイアログ検知
@@ -514,10 +537,7 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
 
                             focus_main_window(c, game_type=GAME_TYPE)
 
-                            c.wait_random()
-                            result_path = f"./log/vs_result_ss/vs_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.png"
-                            Path(result_path).parent.mkdir(parents=True, exist_ok=True)
-                            c.save_ss(result_path, c.take_photo_of("//canvas"))
+                            save_play_data_screenshot(GAME_NAME, GAME_TYPE)
 
                             finish_game(c, is_variety=True, game_type=GAME_TYPE)
                         break
@@ -542,6 +562,7 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                                 '//span[text()[contains(., "精算します")]]/../..//button[text()="精算"]'
                             )
                             c.wait_random()
+                            save_play_data_screenshot(GAME_NAME, GAME_TYPE)
                             finish_game(c, from_dialog=True, is_variety=True, game_type=GAME_TYPE)
                         break
 
@@ -677,9 +698,7 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                                 c.click_relative_pos(button_extraball_end_confirm, "//canvas")
                                 time.sleep(10)
 
-                                result_path = f"./log/vs_result_ss/vs_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.png"
-                                Path(result_path).parent.mkdir(parents=True, exist_ok=True)
-                                c.save_ss(result_path, c.take_photo_of("//canvas"))
+                                save_play_data_screenshot(GAME_NAME, GAME_TYPE)
 
                                 finish_game(c, is_bingo=True, game_type=GAME_TYPE)
                                 bingo_finish_game = True
@@ -702,6 +721,7 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                                     '//span[text()[contains(., "精算します")]]/../..//button[text()="精算"]'
                                 )
                                 c.wait_random()
+                                save_play_data_screenshot(GAME_NAME, GAME_TYPE)
                                 
                                 finish_game(c, from_dialog=True, is_bingo=True, game_type=GAME_TYPE)
                                 bingo_finish_game = True

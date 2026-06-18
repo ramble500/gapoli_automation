@@ -336,7 +336,104 @@ def shrink_window_if_clipped(c: Controller, game_type: str='green'):
     shrink_window(c, game_type=game_type)
 
 
-def start_auto_9999(c: Controller, game_id: int, game_type: str='green', no_fast: bool=False):
+def click_canvas_game_pos(
+    c: Controller,
+    relative_pos: tuple[float, float],
+    canvas_xpath: str = "//canvas",
+    base_width: int = 560,
+    base_height: int = 960,
+):
+    canvas = c.get_element(canvas_xpath)
+    if canvas is None:
+        c.click_relative_pos(relative_pos, canvas_xpath)
+        return
+
+    width, height = c._get_element_size(canvas)
+    if width <= 0 or height <= 0:
+        c.click_relative_pos(relative_pos, canvas_xpath)
+        return
+
+    base_ratio = base_width / base_height
+    canvas_ratio = width / height
+    if canvas_ratio > base_ratio:
+        active_height = height
+        active_width = height * base_ratio
+        offset_x = (width - active_width) / 2
+        offset_y = 0
+    else:
+        active_width = width
+        active_height = width / base_ratio
+        offset_x = 0
+        offset_y = (height - active_height) / 2
+
+    pos = (
+        offset_x + relative_pos[0] * active_width,
+        offset_y + relative_pos[1] * active_height,
+    )
+    logger.debug(
+        "canvas game click: relative=%s pos=%s canvas=%sx%s active=%sx%s offset=%sx%s",
+        relative_pos,
+        pos,
+        width,
+        height,
+        active_width,
+        active_height,
+        offset_x,
+        offset_y,
+    )
+    c._click_element_point_with_mouse(canvas, pos)
+
+
+def click_auto_progress_button(
+    c: Controller,
+    game_type: str = "green",
+    fallback_pos: tuple[float, float] = (525 / 560, 910 / 960),
+    candidate_index: int = 0,
+):
+    candidates = [
+        (525 / 560, 895 / 960),
+        (505 / 560, 895 / 960),
+        (525 / 560, 910 / 960),
+        fallback_pos,
+    ]
+    candidate = candidates[candidate_index % len(candidates)]
+
+    focus_main_window(c, game_type=game_type)
+    try:
+        logger.info(
+            "click canvas auto progress button: candidate=%s pos=%s",
+            candidate_index,
+            candidate,
+        )
+        click_canvas_game_pos(c, candidate)
+        return
+    except CommunicationErrorRecovered:
+        raise
+    except Exception:
+        logger.warning(
+            "canvas auto progress button click failed; fallback to DOM autoButtonWrapper",
+            exc_info=True,
+        )
+
+    c.driver.switch_to.default_content()
+    auto_button_xpath = (
+        f'//div[contains(@class, "{game_type}")]'
+        '//div[contains(@class, "autoButtonWrapper") '
+        'and not(contains(@class, "disabled"))]'
+    )
+    logger.info("click autoButtonWrapper fallback")
+    c.click_it(auto_button_xpath, timeout=5)
+    time.sleep(0.2)
+    focus_main_window(c, game_type=game_type)
+
+
+def start_auto_9999(
+    c: Controller,
+    game_id: int,
+    game_type: str='green',
+    no_fast: bool=False,
+    auto_button_attempt: int = 0,
+):
     b_width = 560
     b_height = 960
 
@@ -355,20 +452,25 @@ def start_auto_9999(c: Controller, game_id: int, game_type: str='green', no_fast
     shrink_window_if_clipped(c, game_type=game_type)
     focus_main_window(c, game_type=game_type)
     logger.info("select auto menu button")
-    c.click_relative_pos(button_auto_menu, "//canvas")
+    click_auto_progress_button(
+        c,
+        game_type=game_type,
+        fallback_pos=button_auto_menu,
+        candidate_index=auto_button_attempt,
+    )
     time.sleep(0.2)
 
     logger.info("select auto spin count 9999")
-    c.click_relative_pos(button_spin_count_9999, "//canvas")
+    click_canvas_game_pos(c, button_spin_count_9999)
     time.sleep(0.2)
 
     if not no_fast:
         logger.info("enable fast auto")
-        c.click_relative_pos(button_fast_auto, "//canvas")
+        click_canvas_game_pos(c, button_fast_auto)
         time.sleep(0.2)
 
     logger.info("confirm auto settings")
-    c.click_relative_pos(button_ok, "//canvas")
+    click_canvas_game_pos(c, button_ok)
 
 
 # ウインドウを定位置に移動する
@@ -566,12 +668,16 @@ def seat(c: Controller, rate: int = 10, credit: int = 10000, accept_payout: int 
 
                                 if '北斗の拳' in game_name:
                                     button_reel_auto = (525/b_width, 925/b_height)
-                                    c.click_relative_pos(button_reel_auto, "//canvas")
+                                    click_auto_progress_button(
+                                        c,
+                                        game_type=game_type,
+                                        fallback_pos=button_reel_auto,
+                                    )
                                     time.sleep(1)
-                                    c.click_relative_pos(button_start, "//canvas")
+                                    click_canvas_game_pos(c, button_start)
                                 else:
-                                    c.click_relative_pos(button_start, "//canvas")
-                                    c.click_relative_pos(button_start_2, "//canvas")  # 場合分けが面倒なので両方押す
+                                    click_canvas_game_pos(c, button_start)
+                                    click_canvas_game_pos(c, button_start_2)  # 場合分けが面倒なので両方押す
 
                                 time.sleep(20)
 
