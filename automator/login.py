@@ -1,7 +1,9 @@
 import io
+import json
 import logging
 import os
 import random
+import socket
 import sys
 import time
 from base64 import b64decode
@@ -26,6 +28,120 @@ from .utils.recovery import raise_if_communication_error
 
 logger = logging.getLogger(__name__)
 
+DISPLAY_PROFILE_VERSION = 1
+DEFAULT_DISPLAY_PROFILE_PATH = Path("./log/runtime/display_profile.json")
+
+
+def _display_profile_path() -> Path:
+    return Path(os.environ.get("GAPOLI_DISPLAY_PROFILE_PATH", DEFAULT_DISPLAY_PROFILE_PATH))
+
+
+def _load_display_profile() -> dict | None:
+    if os.environ.get("GAPOLI_DISABLE_DISPLAY_PROFILE") == "1":
+        logger.info("display profile disabled by GAPOLI_DISABLE_DISPLAY_PROFILE")
+        return None
+    if os.environ.get("GAPOLI_RESET_DISPLAY_PROFILE") == "1":
+        logger.info("display profile reset requested; current run will capture a new profile")
+        return None
+
+    path = _display_profile_path()
+    if not path.exists():
+        return None
+
+    try:
+        profile = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.warning("failed to read display profile: %s", path, exc_info=True)
+        return None
+
+    if profile.get("version") != DISPLAY_PROFILE_VERSION:
+        logger.info("display profile version mismatch; current run will capture a new profile")
+        return None
+
+    window = profile.get("window", {})
+    width = int(window.get("width", 0) or 0)
+    height = int(window.get("height", 0) or 0)
+    if width < 800 or height < 600:
+        logger.info("display profile window size is too small; current run will capture a new profile: %s", window)
+        return None
+
+    return profile
+
+
+def _add_display_profile_options(options, profile: dict | None) -> bool:
+    if profile is None:
+        options.add_argument("--start-maximized")
+        return False
+
+    window = profile.get("window", {})
+    width = int(window["width"])
+    height = int(window["height"])
+    options.add_argument(f"--window-size={width},{height}")
+
+    dpr = profile.get("browser", {}).get("devicePixelRatio")
+    if isinstance(dpr, (int, float)) and 0.5 <= float(dpr) <= 3.0:
+        options.add_argument(f"--force-device-scale-factor={float(dpr):.3f}")
+
+    logger.info(
+        "display profile applied: path=%s window=%sx%s dpr=%s",
+        _display_profile_path(),
+        width,
+        height,
+        dpr,
+    )
+    return True
+
+
+def _capture_browser_display_info(driver) -> dict:
+    return driver.execute_script(
+        """
+        return {
+            browser: {
+                devicePixelRatio: window.devicePixelRatio,
+                innerWidth: window.innerWidth,
+                innerHeight: window.innerHeight,
+                outerWidth: window.outerWidth,
+                outerHeight: window.outerHeight,
+            },
+            screen: {
+                width: window.screen.width,
+                height: window.screen.height,
+                availWidth: window.screen.availWidth,
+                availHeight: window.screen.availHeight,
+                colorDepth: window.screen.colorDepth,
+                pixelDepth: window.screen.pixelDepth,
+            },
+            visualViewport: window.visualViewport ? {
+                width: window.visualViewport.width,
+                height: window.visualViewport.height,
+                scale: window.visualViewport.scale,
+            } : null,
+        };
+        """
+    )
+
+
+def _save_display_profile(driver) -> dict:
+    path = _display_profile_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    window = driver.get_window_rect()
+    profile = {
+        "version": DISPLAY_PROFILE_VERSION,
+        "computer": os.environ.get("COMPUTERNAME") or socket.gethostname(),
+        "capturedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "window": {
+            "x": int(window.get("x", 0) or 0),
+            "y": int(window.get("y", 0) or 0),
+            "width": int(window.get("width", 0) or 0),
+            "height": int(window.get("height", 0) or 0),
+        },
+        **_capture_browser_display_info(driver),
+    }
+    path.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
+    logger.info("display profile captured: path=%s profile=%s", path, profile)
+    return profile
+
 class Controller:
 
     def __init__(
@@ -39,6 +155,8 @@ class Controller:
         custom_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
         #        options.add_argument('--headless')
         os.environ["DISPLAY"] = ":1"
+        display_profile = _load_display_profile()
+        display_profile_applied = False
         if backend == "firefox":
             from selenium.webdriver.firefox.options import Options as FirefoxOptions
             from selenium.webdriver.firefox.webdriver import (
@@ -65,7 +183,7 @@ class Controller:
                 options = ChromeOptions()
                 options.add_argument(f"--user-agent={custom_user_agent}")
                 options.add_argument("--disable-blink-features=AutomationControlled")
-                options.add_argument("--start-maximized")
+                display_profile_applied = _add_display_profile_options(options, display_profile)
                 if not no_mute:
                     options.add_argument("--mute-audio")
                 options.add_argument("--incognito")
@@ -108,6 +226,7 @@ class Controller:
                     options.add_argument(
                         "--disable-blink-features=AutomationControlled"
                     )
+                    display_profile_applied = _add_display_profile_options(options, display_profile)
                     if not no_mute:
                         options.add_argument("--mute-audio")
                     options.add_experimental_option(
@@ -118,13 +237,41 @@ class Controller:
                     raise
 
         self.driver = driver
-        try:
-            self.driver.maximize_window()
-        except Exception:
-            logger.warning("failed to maximize browser window", exc_info=True)
+        self.display_profile_path = _display_profile_path()
+        if display_profile_applied and display_profile is not None:
+            window = display_profile.get("window", {})
+            try:
+                self.driver.set_window_rect(
+                    x=int(window.get("x", 0) or 0),
+                    y=int(window.get("y", 0) or 0),
+                    width=int(window["width"]),
+                    height=int(window["height"]),
+                )
+                logger.info("display profile window rect restored: %s", window)
+            except Exception:
+                logger.warning("failed to restore display profile window rect", exc_info=True)
+        else:
+            try:
+                self.driver.maximize_window()
+            except Exception:
+                logger.warning("failed to maximize browser window", exc_info=True)
+            if os.environ.get("GAPOLI_DISABLE_DISPLAY_PROFILE") != "1":
+                try:
+                    self.display_profile = _save_display_profile(self.driver)
+                except Exception:
+                    logger.warning("failed to capture display profile", exc_info=True)
+            else:
+                self.display_profile = None
+        if display_profile_applied and display_profile is not None:
+            self.display_profile = display_profile
         self.last_ss = None
         self.communication_retry_count = 0
         self.ratio = float(self.driver.execute_script("return window.devicePixelRatio"))
+        logger.info(
+            "browser display ready: ratio=%s window=%s",
+            self.ratio,
+            self.driver.get_window_rect(),
+        )
 
     def login(self, url):
         driver = self.driver
