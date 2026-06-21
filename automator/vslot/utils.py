@@ -425,12 +425,12 @@ def click_auto_progress_button(
 
     candidate_seeds = [
         fallback_pos,
-        (525 / 560, 925 / 960),
-        (505 / 560, 925 / 960),
         (525 / 560, 910 / 960),
         (505 / 560, 910 / 960),
         (525 / 560, 895 / 960),
         (505 / 560, 895 / 960),
+        (525 / 560, 925 / 960),
+        (505 / 560, 925 / 960),
     ]
     candidates = list(dict.fromkeys(candidate_seeds))
     candidate = candidates[candidate_index % len(candidates)]
@@ -755,7 +755,7 @@ def seat(c: Controller, rate: int = 10, credit: int = 10000, accept_payout: int 
                                 button_start_2 = (300/b_width, 605/b_height)
 
                                 if '北斗の拳' in game_name:
-                                    button_reel_auto = (525/b_width, 925/b_height)
+                                    button_reel_auto = (505/b_width, 910/b_height)
                                     click_auto_progress_button(
                                         c,
                                         game_type=game_type,

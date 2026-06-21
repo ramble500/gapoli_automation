@@ -413,7 +413,7 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
             elif IS_VARIETY:
                 b_width = 560
                 b_height = 960
-                button_reel_auto = (525/b_width, 925/b_height) if GAME_ID == 20205 else None
+                button_reel_auto = (505/b_width, 910/b_height) if GAME_ID == 20205 else None
 
                 if GAME_ID == 20205:
                     button_spec = [

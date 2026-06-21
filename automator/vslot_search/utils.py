@@ -332,7 +332,7 @@ def play_variety_once_for_search(c: Controller, game_id: int, game_type: str) ->
     settings = {
         20205: {
             "name": "Hokuto",
-            "reel_auto": (525 / b_width, 925 / b_height),
+            "reel_auto": (505 / b_width, 910 / b_height),
             "spec": (105 / b_width, 255 / b_height),
             "bet": (130 / b_width, 640 / b_height),
             "start": (300 / b_width, 710 / b_height),
