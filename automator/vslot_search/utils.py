@@ -47,7 +47,8 @@ def finish_game(c: Controller, save_image: bool = True, from_dialog=False, is_bi
             'and not(contains(@class, "item"))]'
         )
         el = None
-        for _ in range(30 if not is_variety else 999):
+        max_attempts = 40 if is_variety else 30
+        for attempt in range(1, max_attempts + 1):
             if c.get_element(disabled_check_button_xpath):
                 logger.info("search payoff disabled. press space...")
                 focus_main_window(c, game_type=game_type)
@@ -65,12 +66,16 @@ def finish_game(c: Controller, save_image: bool = True, from_dialog=False, is_bi
                 raise
             except Exception:
                 el = None
-                if not is_bingo and not is_variety:
-                    logger.info("search still in game. press space...")
+                if not is_bingo:
+                    logger.info(
+                        "search settlement confirm not shown. press space... attempt=%s/%s",
+                        attempt,
+                        max_attempts,
+                    )
                     focus_main_window(c, game_type=game_type)
                     c.key_down(" ", "//canvas")
                     c.driver.switch_to.default_content()
-                    time.sleep(5)
+                    time.sleep(3 if is_variety else 5)
                 else:
                     time.sleep(1.5)
 
@@ -78,7 +83,7 @@ def finish_game(c: Controller, save_image: bool = True, from_dialog=False, is_bi
                 break
 
         if el is None:
-            raise TimeoutException("精算確認ダイアログが表示されません")
+            raise TimeoutException(f"精算確認ダイアログが表示されません: attempts={max_attempts}")
     else:
         el = c.wait_it('//div/div/span[text()[contains(.,"精算確認")]]')
 
@@ -374,6 +379,7 @@ def play_variety_once_for_search(c: Controller, game_id: int, game_type: str) ->
             c,
             game_type=game_type,
             fallback_pos=setting["reel_auto"],
+            prefer_dom=False,
         )
         time.sleep(0.5)
 
@@ -538,10 +544,13 @@ def seat_and_check_payout(c: Controller, game_id: int, is_bingo: bool=False, is_
                     break
 
     finally:
-        c.driver.execute_cdp_cmd("Network.disable", {})
-        c.driver.execute_cdp_cmd(
-            "Network.setCacheDisabled", {"cacheDisabled": False}
-        )
+        try:
+            c.driver.execute_cdp_cmd("Network.disable", {})
+            c.driver.execute_cdp_cmd(
+                "Network.setCacheDisabled", {"cacheDisabled": False}
+            )
+        except Exception:
+            logger.warning("failed to cleanup search network logging", exc_info=True)
 
     if payout is None:
         raise Exception("buy_medal response was not found; payout could not be checked")

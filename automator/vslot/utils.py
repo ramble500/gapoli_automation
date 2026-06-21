@@ -404,6 +404,7 @@ def click_auto_progress_button(
     game_type: str = "green",
     fallback_pos: tuple[float, float] = (525 / 560, 910 / 960),
     candidate_index: int = 0,
+    prefer_dom: bool = True,
 ):
     c.driver.switch_to.default_content()
     auto_button_xpath = (
@@ -411,7 +412,7 @@ def click_auto_progress_button(
         '//div[contains(@class, "autoButtonWrapper") '
         'and not(contains(@class, "disabled"))]'
     )
-    if c.get_element(auto_button_xpath) is not None:
+    if prefer_dom and c.get_element(auto_button_xpath) is not None:
         try:
             logger.info("click autoButtonWrapper")
             c.click_it(auto_button_xpath, timeout=2)
@@ -447,6 +448,9 @@ def click_auto_progress_button(
     except CommunicationErrorRecovered:
         raise
     except Exception:
+        if not prefer_dom:
+            logger.warning("canvas auto progress button click failed", exc_info=True)
+            raise
         logger.warning(
             "canvas auto progress button click failed; fallback to DOM autoButtonWrapper",
             exc_info=True,
@@ -760,6 +764,7 @@ def seat(c: Controller, rate: int = 10, credit: int = 10000, accept_payout: int 
                                         c,
                                         game_type=game_type,
                                         fallback_pos=button_reel_auto,
+                                        prefer_dom=False,
                                     )
                                     time.sleep(1)
                                     click_canvas_game_pos(c, button_start)
@@ -788,10 +793,13 @@ def seat(c: Controller, rate: int = 10, credit: int = 10000, accept_payout: int 
                             break
 
         finally:
-            c.driver.execute_cdp_cmd("Network.disable", {})
-            c.driver.execute_cdp_cmd(
-                "Network.setCacheDisabled", {"cacheDisabled": False}
-            )
+            try:
+                c.driver.execute_cdp_cmd("Network.disable", {})
+                c.driver.execute_cdp_cmd(
+                    "Network.setCacheDisabled", {"cacheDisabled": False}
+                )
+            except Exception:
+                logger.warning("failed to cleanup network logging", exc_info=True)
 
         if is_continue:
             logger.info("continue")

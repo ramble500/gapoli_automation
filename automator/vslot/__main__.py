@@ -477,6 +477,7 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                             c,
                             game_type=GAME_TYPE,
                             fallback_pos=button_reel_auto,
+                            prefer_dom=False,
                         )
                         time.sleep(0.5)
 
