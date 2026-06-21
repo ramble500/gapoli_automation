@@ -10,7 +10,7 @@ from selenium.common.exceptions import TimeoutException
 
 from automator.login import Controller
 from automator.utils.influx import write_influx
-from automator.utils.recovery import raise_if_communication_error
+from automator.utils.recovery import CommunicationErrorRecovered, raise_if_communication_error
 from automator.vslot.utils import (
     click_auto_progress_button,
     click_canvas_game_pos,
@@ -34,17 +34,51 @@ def finish_game(c: Controller, save_image: bool = True, from_dialog=False, is_bi
     c.driver.switch_to.default_content()
 
     if not from_dialog:
+        disabled_check_button_xpath = (
+            f'//div[contains(@class, "{game_type}")]'
+            '//div[contains(@class, "checkButtonWrapper") '
+            'and contains(@class, "disabled") '
+            'and not(contains(@class, "item"))]'
+        )
         check_button_xpath = (
             f'//div[contains(@class, "{game_type}")]'
             '//div[contains(@class, "checkButtonWrapper") '
             'and not(contains(@class, "disabled")) '
             'and not(contains(@class, "item"))]'
         )
-        c.wait_it(check_button_xpath, timeout=60)
-        logger.info("click checkButtonWrapper")
-        c.click_it(check_button_xpath)
-        c.wait_random()
-        el = c.wait_it('//div/div/span[text()[contains(.,"精算確認")]]', timeout=10)
+        el = None
+        for _ in range(30 if not is_variety else 999):
+            if c.get_element(disabled_check_button_xpath):
+                logger.info("search payoff disabled. press space...")
+                focus_main_window(c, game_type=game_type)
+                c.key_down(" ", "//canvas")
+                c.driver.switch_to.default_content()
+                time.sleep(1)
+
+            c.wait_it(check_button_xpath, timeout=60)
+            logger.info("click checkButtonWrapper")
+            c.click_it(check_button_xpath)
+            c.wait_random()
+            try:
+                el = c.wait_it('//div/div/span[text()[contains(.,"精算確認")]]', timeout=2)
+            except CommunicationErrorRecovered:
+                raise
+            except Exception:
+                el = None
+                if not is_bingo and not is_variety:
+                    logger.info("search still in game. press space...")
+                    focus_main_window(c, game_type=game_type)
+                    c.key_down(" ", "//canvas")
+                    c.driver.switch_to.default_content()
+                    time.sleep(5)
+                else:
+                    time.sleep(1.5)
+
+            if el is not None:
+                break
+
+        if el is None:
+            raise TimeoutException("精算確認ダイアログが表示されません")
     else:
         el = c.wait_it('//div/div/span[text()[contains(.,"精算確認")]]')
 
@@ -58,40 +92,65 @@ def finish_game(c: Controller, save_image: bool = True, from_dialog=False, is_bi
     c.wait_random()
 
     timeout = time.time() + 20  # 最大20秒
+    no_button_count = 0
+
+    def safe_click(xpath: str):
+        try:
+            c.click_it(xpath)
+        except CommunicationErrorRecovered:
+            raise
+        except Exception:
+            logger.warning(f"通常クリック失敗: {xpath}", exc_info=True)
+            raise
 
     while time.time() < timeout:
-        # ① 次へ（最優先）
-        next_button = c.get_element('//button[contains(normalize-space(.), "次へ")]')
-        if next_button is not None:
-            logger.info("『次へ』をクリック")
-            c.click_it('//button[contains(normalize-space(.), "次へ")]')
-            c.wait_random()
-            time.sleep(0.8)
-            continue
+        next_xpath = '//button[contains(normalize-space(.), "次へ")]'
+        skip_xpath = '//button[contains(normalize-space(.), "スキップ")]'
+        end_xpath = '//button[contains(normalize-space(.), "プレイ終了")]'
 
-        # ② スキップ（次に優先）
-        skip_button = c.get_element('//button[contains(normalize-space(.), "スキップ")]')
-        if skip_button is not None:
-            logger.info("『スキップ』をクリック")
-            c.click_it('//button[contains(normalize-space(.), "スキップ")]')
-            c.wait_random()
-            time.sleep(0.8)
-            continue
+        next_button = c.get_element(next_xpath)
+        skip_button = c.get_element(skip_xpath)
+        play_end_button = c.get_element(end_xpath)
 
-        # ③ プレイ終了（最後）
-        play_end_button = c.get_element('//button[contains(normalize-space(.), "プレイ終了")]')
-        if play_end_button is not None:
-            logger.info("『プレイ終了』をクリック")
-            c.click_it('//button[contains(normalize-space(.), "プレイ終了")]')
-            c.wait_random()
-            logger.info("終了")
+        if next_button is None and skip_button is None and play_end_button is None:
+            no_button_count += 1
+        else:
+            no_button_count = 0
+
+        if no_button_count >= 4:
+            logger.info("前面の終了ボタン群消失を連続確認")
             break
 
-        # どれもない → UI遷移中
+        if next_button is not None:
+            logger.info("『次へ』をクリック")
+            safe_click(next_xpath)
+            no_button_count = 0
+            c.wait_random()
+            time.sleep(1.0)
+            continue
+
+        if skip_button is not None:
+            logger.info("『スキップ』をクリック")
+            safe_click(skip_xpath)
+            no_button_count = 0
+            c.wait_random()
+            time.sleep(1.0)
+            continue
+
+        if play_end_button is not None:
+            logger.info("『プレイ終了』をクリック")
+            safe_click(end_xpath)
+            no_button_count = 0
+            c.wait_random()
+            time.sleep(1.5)
+            continue
+
         time.sleep(0.5)
 
     else:
-        raise Exception("精算後の画面遷移が完了しません（ボタン検出不可）")
+        raise Exception("精算後の画面遷移が完了しません（前面ポップアップが消えない）")
+
+    logger.info("終了")
         
 def take_store_all(c):
     raise_if_communication_error(c)
