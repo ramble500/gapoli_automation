@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import List
 
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.keys import Keys
 
 from automator.login import Controller
@@ -338,24 +339,21 @@ def shrink_window_if_clipped(c: Controller, game_type: str='green'):
     shrink_window(c, game_type=game_type)
 
 
-def click_canvas_game_pos(
+def _canvas_game_click_target(
     c: Controller,
     relative_pos: tuple[float, float],
     canvas_xpath: str = "//canvas",
     base_width: int = 560,
     base_height: int = 960,
     aspect_tolerance: float = 0.04,
-    allow_top_overlay: bool = False,
 ):
     canvas = c.get_element(canvas_xpath)
     if canvas is None:
-        c.click_relative_pos(relative_pos, canvas_xpath)
-        return
+        return None, None, None
 
     width, height = c._get_element_size(canvas)
     if width <= 0 or height <= 0:
-        c.click_relative_pos(relative_pos, canvas_xpath)
-        return
+        return canvas, None, None
 
     base_ratio = base_width / base_height
     canvas_ratio = width / height
@@ -383,19 +381,120 @@ def click_canvas_game_pos(
         offset_x + relative_pos[0] * active_width,
         offset_y + relative_pos[1] * active_height,
     )
+    return canvas, pos, {
+        "mode": mode,
+        "width": width,
+        "height": height,
+        "active_width": active_width,
+        "active_height": active_height,
+        "offset_x": offset_x,
+        "offset_y": offset_y,
+        "canvas_ratio": canvas_ratio,
+        "base_ratio": base_ratio,
+    }
+
+
+def _is_canvas_top_overlay_ready(info) -> bool:
+    if info is None:
+        return False
+    top_class = str(info.get("topHitClassName", ""))
+    top_tag = info.get("topHitTagName")
+    return (
+        info["inViewport"]
+        and info["targetReceivesClick"]
+        and info["topInViewport"]
+        and not info["topTargetReceivesClick"]
+        and top_tag not in (None, "IFRAME", "CANVAS")
+        and "overlayer" not in top_class
+        and "backdropColor" not in top_class
+    )
+
+
+def wait_canvas_game_top_overlay(
+    c: Controller,
+    relative_pos: tuple[float, float],
+    label: str,
+    timeout: float = 8.0,
+    canvas_xpath: str = "//canvas",
+    allow_canvas_after: float | None = None,
+):
+    canvas, pos, _ = _canvas_game_click_target(
+        c,
+        relative_pos,
+        canvas_xpath=canvas_xpath,
+    )
+    if canvas is None or pos is None:
+        time.sleep(0.5)
+        return
+
+    deadline = time.monotonic() + timeout
+    started_at = time.monotonic()
+    next_log_at = 0
+    last_info = None
+    while time.monotonic() < deadline:
+        raise_if_communication_error(c)
+        c._scroll_element_point_into_view(canvas, pos)
+        last_info = c._get_element_point_visibility(canvas, pos)
+        if _is_canvas_top_overlay_ready(last_info):
+            logger.debug("auto settings overlay ready: %s info=%s", label, last_info)
+            return
+        if (
+            allow_canvas_after is not None
+            and time.monotonic() - started_at >= allow_canvas_after
+            and last_info["clickable"]
+        ):
+            logger.debug("auto settings canvas point ready: %s info=%s", label, last_info)
+            return
+
+        now = time.monotonic()
+        if now >= next_log_at:
+            logger.debug(
+                "waiting auto settings overlay: %s info=%s",
+                label,
+                last_info,
+            )
+            next_log_at = now + 1.0
+        time.sleep(0.2)
+
+    raise TimeoutException(
+        f"auto settings overlay did not become ready: {label} last={last_info}"
+    )
+
+
+def click_canvas_game_pos(
+    c: Controller,
+    relative_pos: tuple[float, float],
+    canvas_xpath: str = "//canvas",
+    base_width: int = 560,
+    base_height: int = 960,
+    aspect_tolerance: float = 0.04,
+    allow_top_overlay: bool = False,
+):
+    canvas, pos, meta = _canvas_game_click_target(
+        c,
+        relative_pos,
+        canvas_xpath=canvas_xpath,
+        base_width=base_width,
+        base_height=base_height,
+        aspect_tolerance=aspect_tolerance,
+    )
+    if canvas is None or pos is None:
+        c.click_relative_pos(relative_pos, canvas_xpath)
+        return
+
     logger.debug(
         "canvas game click: mode=%s relative=%s pos=%s canvas=%sx%s active=%sx%s offset=%sx%s ratio=%s base_ratio=%s",
-        mode,
+        meta["mode"],
         relative_pos,
         pos,
-        width,
-        height,
-        active_width,
-        active_height,
-        offset_x,
-        offset_y,
-        canvas_ratio,
-        base_ratio,
+        meta["width"],
+        meta["height"],
+        meta["active_width"],
+        meta["active_height"],
+        meta["offset_x"],
+        meta["offset_y"],
+        meta["canvas_ratio"],
+        meta["base_ratio"],
     )
     c._click_element_point_with_mouse(
         canvas,
@@ -499,19 +598,40 @@ def start_auto_9999(
         fallback_pos=button_auto_menu,
         candidate_index=auto_button_attempt,
     )
-    time.sleep(0.2)
+    wait_canvas_game_top_overlay(
+        c,
+        button_spin_count_9999,
+        label="auto spin count 9999",
+        timeout=12.0,
+        allow_canvas_after=3.0,
+    )
 
     logger.info("select auto spin count 9999")
     click_canvas_game_pos(c, button_spin_count_9999, allow_top_overlay=True)
-    time.sleep(0.2)
+    time.sleep(0.5)
 
     if not no_fast:
+        wait_canvas_game_top_overlay(
+            c,
+            button_fast_auto,
+            label="fast auto checkbox",
+            timeout=12.0,
+            allow_canvas_after=1.5,
+        )
         logger.info("enable fast auto")
         click_canvas_game_pos(c, button_fast_auto, allow_top_overlay=True)
-        time.sleep(0.2)
+        time.sleep(0.5)
 
+    wait_canvas_game_top_overlay(
+        c,
+        button_ok,
+        label="auto settings ok",
+        timeout=12.0,
+        allow_canvas_after=1.5,
+    )
     logger.info("confirm auto settings")
     click_canvas_game_pos(c, button_ok, allow_top_overlay=True)
+    time.sleep(0.8)
 
 
 # ウインドウを定位置に移動する
