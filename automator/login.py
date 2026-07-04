@@ -871,11 +871,29 @@ class Controller:
         context: bool = False,
         pause: float = 0.04,
         timeout: float = 10.0,
+        allow_top_overlay: bool = False,
     ):
         frame_path = self._get_frame_path_to_top()
         info = None
         deadline = time.monotonic() + timeout
         next_log_at = 0
+
+        def accepts_top_overlay(current_info):
+            top_class = (
+                str(current_info.get("topHitClassName", ""))
+                if current_info
+                else ""
+            )
+            return (
+                allow_top_overlay
+                and current_info is not None
+                and current_info["inViewport"]
+                and current_info["targetReceivesClick"]
+                and current_info["topInViewport"]
+                and current_info["topHitTagName"] is not None
+                and "overlayer" not in top_class
+                and "backdropColor" not in top_class
+            )
 
         while time.monotonic() < deadline:
             if not getattr(self, "_recovering_communication_error", False):
@@ -884,7 +902,7 @@ class Controller:
             for attempt in range(max_attempts):
                 self._scroll_element_point_into_view(el, pos)
                 info = self._get_element_point_visibility(el, pos)
-                if info["clickable"]:
+                if info["clickable"] or accepts_top_overlay(info):
                     break
 
                 if (
@@ -901,7 +919,7 @@ class Controller:
 
                 break
 
-            if info is not None and info["clickable"]:
+            if info is not None and (info["clickable"] or accepts_top_overlay(info)):
                 break
 
             now = time.monotonic()
@@ -910,7 +928,8 @@ class Controller:
                 next_log_at = now + 1.0
             time.sleep(0.2)
 
-        if info is None or not info["clickable"]:
+        overlay_click = accepts_top_overlay(info)
+        if info is None or (not info["clickable"] and not overlay_click):
             self._restore_frame_path(frame_path)
             raise selenium.common.exceptions.MoveTargetOutOfBoundsException(
                 f"target point did not become visibly clickable: {info}"
@@ -919,6 +938,8 @@ class Controller:
         try:
             self.driver.switch_to.default_content()
             target = self._get_top_viewport_click_origin(info)
+            if overlay_click and not info["clickable"]:
+                logger.debug("mouse click accepted top overlay target: %s", info)
             logger.debug("mouse click target: %s", target["log"])
             ac = ActionChains(self.driver, duration=int(pause * 1000))
             ac.move_to_element_with_offset(

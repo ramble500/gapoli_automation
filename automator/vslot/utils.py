@@ -345,6 +345,7 @@ def click_canvas_game_pos(
     base_width: int = 560,
     base_height: int = 960,
     aspect_tolerance: float = 0.04,
+    allow_top_overlay: bool = False,
 ):
     canvas = c.get_element(canvas_xpath)
     if canvas is None:
@@ -396,7 +397,11 @@ def click_canvas_game_pos(
         canvas_ratio,
         base_ratio,
     )
-    c._click_element_point_with_mouse(canvas, pos)
+    c._click_element_point_with_mouse(
+        canvas,
+        pos,
+        allow_top_overlay=allow_top_overlay,
+    )
 
 
 def click_auto_progress_button(
@@ -497,16 +502,16 @@ def start_auto_9999(
     time.sleep(0.2)
 
     logger.info("select auto spin count 9999")
-    click_canvas_game_pos(c, button_spin_count_9999)
+    click_canvas_game_pos(c, button_spin_count_9999, allow_top_overlay=True)
     time.sleep(0.2)
 
     if not no_fast:
         logger.info("enable fast auto")
-        click_canvas_game_pos(c, button_fast_auto)
+        click_canvas_game_pos(c, button_fast_auto, allow_top_overlay=True)
         time.sleep(0.2)
 
     logger.info("confirm auto settings")
-    click_canvas_game_pos(c, button_ok)
+    click_canvas_game_pos(c, button_ok, allow_top_overlay=True)
 
 
 # ウインドウを定位置に移動する
