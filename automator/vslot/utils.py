@@ -3,10 +3,12 @@ import datetime
 import json
 import logging
 import random
+import re
 import time
 from pathlib import Path
 from typing import List
 
+from PIL import ImageOps
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.keys import Keys
 
@@ -18,6 +20,7 @@ from automator.utils.recovery import (
 )
 
 logger = logging.getLogger(__name__)
+_AUTO_COUNT_OCR_WARNING_LOGGED = False
 
 
 def focus_main_window(c: Controller, game_type: str = 'green'):
@@ -501,6 +504,137 @@ def click_canvas_game_pos(
         pos,
         allow_top_overlay=allow_top_overlay,
     )
+
+
+def _active_game_rect(
+    width: int,
+    height: int,
+    base_width: int = 560,
+    base_height: int = 960,
+) -> tuple[int, int, int, int]:
+    base_ratio = base_width / base_height
+    image_ratio = width / height
+    if image_ratio > base_ratio:
+        active_height = height
+        active_width = int(round(height * base_ratio))
+        left = int(round((width - active_width) / 2))
+        top = 0
+    else:
+        active_width = width
+        active_height = int(round(width / base_ratio))
+        left = 0
+        top = int(round((height - active_height) / 2))
+    return left, top, left + active_width, top + active_height
+
+
+def _crop_active_relative(image, box: tuple[float, float, float, float]):
+    active_left, active_top, active_right, active_bottom = _active_game_rect(
+        image.width,
+        image.height,
+    )
+    active_width = active_right - active_left
+    active_height = active_bottom - active_top
+    left = active_left + int(round(box[0] * active_width))
+    top = active_top + int(round(box[1] * active_height))
+    right = active_left + int(round(box[2] * active_width))
+    bottom = active_top + int(round(box[3] * active_height))
+    return image.crop((left, top, right, bottom))
+
+
+def _ocr_digits_from_image(image) -> tuple[int | None, str]:
+    import pytesseract
+
+    gray = ImageOps.grayscale(image)
+    gray = ImageOps.autocontrast(gray)
+    scale = max(1, int(round(180 / max(1, gray.height))))
+    enlarged = gray.resize((gray.width * scale, gray.height * scale))
+    variants = [enlarged]
+    variants.append(ImageOps.invert(enlarged))
+    variants.append(enlarged.point(lambda p: 255 if p > 150 else 0))
+
+    texts = []
+    config = "--psm 7 -c tessedit_char_whitelist=0123456789,"
+    for variant in variants:
+        text = pytesseract.image_to_string(
+            variant,
+            lang="eng",
+            config=config,
+        ).strip()
+        if text:
+            texts.append(text)
+        normalized = text.replace(",", "")
+        digits = "".join(re.findall(r"\d+", normalized))
+        if digits:
+            return int(digits), text
+
+    return None, " / ".join(texts)
+
+
+def read_auto_progress_count(
+    c: Controller,
+    game_type: str = "green",
+    game_name: str | None = None,
+) -> int | None:
+    global _AUTO_COUNT_OCR_WARNING_LOGGED
+    crop_boxes = [
+        (0.78, 0.84, 0.995, 0.985),
+        (0.82, 0.86, 0.995, 0.965),
+        (0.70, 0.80, 0.995, 0.995),
+    ]
+
+    focus_main_window(c, game_type=game_type)
+    try:
+        try:
+            image = c.take_image_from_canvas("//canvas")
+        except CommunicationErrorRecovered:
+            raise
+        except Exception:
+            logger.debug(
+                "[%s] auto count canvas capture failed; falling back to screenshot crop",
+                game_name or game_type,
+                exc_info=True,
+            )
+            image = c.take_photo_of("//canvas")
+
+        last_text = ""
+        for box in crop_boxes:
+            crop = _crop_active_relative(image, box)
+            try:
+                count, text = _ocr_digits_from_image(crop)
+            except Exception:
+                if not _AUTO_COUNT_OCR_WARNING_LOGGED:
+                    logger.warning(
+                        "[%s] auto count OCR failed",
+                        game_name or game_type,
+                        exc_info=True,
+                    )
+                    _AUTO_COUNT_OCR_WARNING_LOGGED = True
+                else:
+                    logger.debug(
+                        "[%s] auto count OCR failed",
+                        game_name or game_type,
+                        exc_info=True,
+                    )
+                return None
+            last_text = text
+            if count is not None and count > 0:
+                logger.info(
+                    "[%s] auto progress count detected: %s (ocr=%r box=%s)",
+                    game_name or game_type,
+                    count,
+                    text,
+                    box,
+                )
+                return count
+
+        logger.debug(
+            "[%s] auto progress count not detected: last_ocr=%r",
+            game_name or game_type,
+            last_text,
+        )
+        return None
+    finally:
+        c.driver.switch_to.default_content()
 
 
 def click_auto_progress_button(

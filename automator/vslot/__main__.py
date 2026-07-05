@@ -24,6 +24,7 @@ from automator.vslot.utils import (
     bring_window_to_front,
     click_auto_progress_button,
     click_canvas_game_pos,
+    read_auto_progress_count,
 )
 
 load_dotenv(verbose=True)
@@ -212,6 +213,40 @@ def wait_for_game_medal_change(
     return False
 
 
+def wait_for_auto_progress_count(
+    processing_lock: threading.Lock,
+    game_type: str,
+    game_name: str,
+    timeout: float = 25.0,
+) -> bool:
+    deadline = time.time() + timeout
+    next_log_at = 0
+    while time.time() < deadline:
+        time.sleep(1.5)
+        with processing_lock:
+            auto_count = read_auto_progress_count(
+                c,
+                game_type=game_type,
+                game_name=game_name,
+            )
+
+        if auto_count is not None and auto_count > 0:
+            logger.warning(
+                "[%s] オート開始を右下残数表示で確認: %s",
+                game_name,
+                auto_count,
+            )
+            return True
+
+        now = time.time()
+        if now >= next_log_at:
+            logger.info("[%s] オート残数表示待ち...", game_name)
+            next_log_at = now + 5.0
+
+    logger.warning("[%s] オート残数表示を確認できませんでした。", game_name)
+    return False
+
+
 def game_loop(GAME_ID: int, processing_lock: threading.Lock):
     game_name = MACHINE_LIST.get(GAME_ID, str(GAME_ID))
     while True:
@@ -301,7 +336,6 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                 for auto_attempt in range(1, 5):
                     # オート開始処理を行う間はロック
                     with processing_lock:
-                        before_auto_medal = read_game_medal(5, GAME_ID, GAME_NAME)
                         bring_window_to_front(c, game_type=GAME_TYPE)
                         start_auto_9999(
                             c,
@@ -314,18 +348,15 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                         c.driver.switch_to.default_content()
 
                     logger.warning(f"[{GAME_NAME}] オート開始設定を実行 ({auto_attempt}/4).")
-                    auto_started = wait_for_game_medal_change(
+                    auto_started = wait_for_auto_progress_count(
                         processing_lock,
-                        5,
-                        GAME_ID,
+                        GAME_TYPE,
                         GAME_NAME,
-                        before_auto_medal,
                     )
                     if auto_started:
-                        logger.warning(f"[{GAME_NAME}] オート開始をcredit変化で確認.")
                         break
 
-                    logger.warning(f"[{GAME_NAME}] オート開始後のcredit変化なし。再設定します.")
+                    logger.warning(f"[{GAME_NAME}] オート残数表示なし。再設定します。")
 
                 if not auto_started:
                     logger.warning(f"[{GAME_NAME}] オート開始確認失敗。スペース補助ループで監視継続.")
