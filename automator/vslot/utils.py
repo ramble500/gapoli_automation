@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from typing import List
 
+import cv2
+import numpy as np
 from PIL import ImageOps
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.keys import Keys
@@ -21,6 +23,7 @@ from automator.utils.recovery import (
 
 logger = logging.getLogger(__name__)
 _AUTO_COUNT_OCR_WARNING_LOGGED = False
+_AUTO_COUNT_OCR_AVAILABLE = None
 
 
 def focus_main_window(c: Controller, game_type: str = 'green'):
@@ -542,6 +545,11 @@ def _crop_active_relative(image, box: tuple[float, float, float, float]):
 
 
 def _ocr_digits_from_image(image) -> tuple[int | None, str]:
+    global _AUTO_COUNT_OCR_AVAILABLE
+
+    if _AUTO_COUNT_OCR_AVAILABLE is False:
+        return None, "tesseract_unavailable"
+
     import pytesseract
 
     gray = ImageOps.grayscale(image)
@@ -555,11 +563,18 @@ def _ocr_digits_from_image(image) -> tuple[int | None, str]:
     texts = []
     config = "--psm 7 -c tessedit_char_whitelist=0123456789,"
     for variant in variants:
-        text = pytesseract.image_to_string(
-            variant,
-            lang="eng",
-            config=config,
-        ).strip()
+        try:
+            text = pytesseract.image_to_string(
+                variant,
+                lang="eng",
+                config=config,
+            ).strip()
+        except Exception as e:
+            if e.__class__.__name__ == "TesseractNotFoundError":
+                _AUTO_COUNT_OCR_AVAILABLE = False
+                return None, "tesseract_unavailable"
+            raise
+        _AUTO_COUNT_OCR_AVAILABLE = True
         if text:
             texts.append(text)
         normalized = text.replace(",", "")
@@ -570,6 +585,69 @@ def _ocr_digits_from_image(image) -> tuple[int | None, str]:
     return None, " / ".join(texts)
 
 
+def _looks_like_auto_count_indicator(image) -> bool:
+    gray = ImageOps.grayscale(image)
+    gray = ImageOps.autocontrast(gray)
+    arr = np.array(gray)
+    if arr.size == 0:
+        return False
+
+    h, w = arr.shape[:2]
+    if h < 10 or w < 10:
+        return False
+
+    y0 = max(0, int(h * 0.08))
+    y1 = min(h, int(h * 0.92))
+    x0 = max(0, int(w * 0.05))
+    x1 = min(w, int(w * 0.95))
+    arr = arr[y0:y1, x0:x1]
+    h, w = arr.shape[:2]
+
+    bright_threshold = max(150, int(np.percentile(arr, 88)))
+    mask = (arr >= bright_threshold).astype(np.uint8) * 255
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+
+    pixel_ratio = float(np.count_nonzero(mask)) / float(mask.size)
+    if pixel_ratio < 0.012 or pixel_ratio > 0.45:
+        return False
+
+    _, _, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+    components = []
+    for x, y, cw, ch, area in stats[1:]:
+        if area < 4:
+            continue
+        if area > mask.size * 0.35:
+            continue
+        if ch < max(5, h * 0.14) or ch > h * 0.9:
+            continue
+        if cw < 2 or cw > w * 0.75:
+            continue
+        density = area / max(1, cw * ch)
+        if density < 0.10 or density > 0.90:
+            continue
+        components.append((x, y, cw, ch, area))
+
+    if not components:
+        return False
+
+    left = min(x for x, _, _, _, _ in components)
+    right = max(x + cw for x, _, cw, _, _ in components)
+    top = min(y for _, y, _, _, _ in components)
+    bottom = max(y + ch for _, y, _, ch, _ in components)
+    coverage_w = (right - left) / max(1, w)
+    coverage_h = (bottom - top) / max(1, h)
+
+    return (
+        1 <= len(components) <= 10
+        and 0.10 <= coverage_w <= 0.90
+        and 0.16 <= coverage_h <= 0.86
+    )
+
+
+def is_auto_progress_ocr_unavailable() -> bool:
+    return _AUTO_COUNT_OCR_AVAILABLE is False
+
+
 def read_auto_progress_count(
     c: Controller,
     game_type: str = "green",
@@ -577,8 +655,8 @@ def read_auto_progress_count(
 ) -> int | None:
     global _AUTO_COUNT_OCR_WARNING_LOGGED
     crop_boxes = [
+        (0.82, 0.84, 0.995, 0.965),
         (0.78, 0.84, 0.995, 0.985),
-        (0.82, 0.86, 0.995, 0.965),
         (0.70, 0.80, 0.995, 0.995),
     ]
 
@@ -617,6 +695,12 @@ def read_auto_progress_count(
                     )
                 return None
             last_text = text
+            if text == "tesseract_unavailable" and not _AUTO_COUNT_OCR_WARNING_LOGGED:
+                logger.warning(
+                    "[%s] tesseract is unavailable; using visual auto count detection",
+                    game_name or game_type,
+                )
+                _AUTO_COUNT_OCR_WARNING_LOGGED = True
             if count is not None and count > 0:
                 logger.info(
                     "[%s] auto progress count detected: %s (ocr=%r box=%s)",
@@ -626,6 +710,14 @@ def read_auto_progress_count(
                     box,
                 )
                 return count
+            if _looks_like_auto_count_indicator(crop):
+                logger.info(
+                    "[%s] auto progress indicator detected visually (ocr=%r box=%s)",
+                    game_name or game_type,
+                    text,
+                    box,
+                )
+                return 1
 
         logger.debug(
             "[%s] auto progress count not detected: last_ocr=%r",

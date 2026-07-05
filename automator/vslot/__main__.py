@@ -24,6 +24,7 @@ from automator.vslot.utils import (
     bring_window_to_front,
     click_auto_progress_button,
     click_canvas_game_pos,
+    is_auto_progress_ocr_unavailable,
     read_auto_progress_count,
 )
 
@@ -218,9 +219,10 @@ def wait_for_auto_progress_count(
     game_type: str,
     game_name: str,
     timeout: float = 25.0,
-) -> bool:
+) -> bool | None:
     deadline = time.time() + timeout
     next_log_at = 0
+    verification_limited = False
     while time.time() < deadline:
         time.sleep(1.5)
         with processing_lock:
@@ -230,6 +232,7 @@ def wait_for_auto_progress_count(
                 game_name=game_name,
             )
 
+        verification_limited = verification_limited or is_auto_progress_ocr_unavailable()
         if auto_count is not None and auto_count > 0:
             logger.warning(
                 "[%s] オート開始を右下残数表示で確認: %s",
@@ -242,6 +245,13 @@ def wait_for_auto_progress_count(
         if now >= next_log_at:
             logger.info("[%s] オート残数表示待ち...", game_name)
             next_log_at = now + 5.0
+
+    if verification_limited:
+        logger.warning(
+            "[%s] オート残数表示を確定できませんでしたが、OCRが利用不可のため再設定は行いません。",
+            game_name,
+        )
+        return None
 
     logger.warning("[%s] オート残数表示を確認できませんでした。", game_name)
     return False
@@ -354,6 +364,12 @@ def _game_loop(GAME_ID: int, processing_lock: threading.Lock):
                         GAME_NAME,
                     )
                     if auto_started:
+                        break
+                    if auto_started is None:
+                        auto_started = True
+                        logger.warning(
+                            f"[{GAME_NAME}] オート確認不能のため、追加クリックせず監視へ進みます。"
+                        )
                         break
 
                     logger.warning(f"[{GAME_NAME}] オート残数表示なし。再設定します。")
