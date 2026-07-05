@@ -734,25 +734,13 @@ def click_auto_progress_button(
     game_type: str = "green",
     fallback_pos: tuple[float, float] = (525 / 560, 910 / 960),
     candidate_index: int = 0,
-    prefer_dom: bool = True,
+    prefer_dom: bool = False,
 ):
     c.driver.switch_to.default_content()
-    auto_button_xpath = (
-        f'//div[contains(@class, "{game_type}")]'
-        '//div[contains(@class, "autoButtonWrapper") '
-        'and not(contains(@class, "disabled"))]'
-    )
-    if prefer_dom and c.get_element(auto_button_xpath) is not None:
-        try:
-            logger.info("click autoButtonWrapper")
-            c.click_it(auto_button_xpath, timeout=2)
-            time.sleep(0.2)
-            focus_main_window(c, game_type=game_type)
-            return
-        except CommunicationErrorRecovered:
-            raise
-        except Exception:
-            logger.debug("autoButtonWrapper click failed; fallback to canvas", exc_info=True)
+    if prefer_dom:
+        logger.warning(
+            "DOM autoButtonWrapper click is disabled for auto progress; using canvas"
+        )
 
     candidate_seeds = [
         fallback_pos,
@@ -778,19 +766,8 @@ def click_auto_progress_button(
     except CommunicationErrorRecovered:
         raise
     except Exception:
-        if not prefer_dom:
-            logger.warning("canvas auto progress button click failed", exc_info=True)
-            raise
-        logger.warning(
-            "canvas auto progress button click failed; fallback to DOM autoButtonWrapper",
-            exc_info=True,
-        )
-
-    c.driver.switch_to.default_content()
-    logger.info("click autoButtonWrapper fallback")
-    c.click_it(auto_button_xpath, timeout=5)
-    time.sleep(0.2)
-    focus_main_window(c, game_type=game_type)
+        logger.warning("canvas auto progress button click failed", exc_info=True)
+        raise
 
 
 def start_auto_9999(
@@ -817,12 +794,13 @@ def start_auto_9999(
 
     shrink_window_if_clipped(c, game_type=game_type)
     focus_main_window(c, game_type=game_type)
-    logger.info("select auto menu button")
+    logger.info("select auto menu button by canvas")
     click_auto_progress_button(
         c,
         game_type=game_type,
         fallback_pos=button_auto_menu,
         candidate_index=auto_button_attempt,
+        prefer_dom=False,
     )
     wait_canvas_game_top_overlay(
         c,
